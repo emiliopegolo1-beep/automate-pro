@@ -1230,8 +1230,8 @@ def api_create_checkout_session():
                     "quantity": 1,
                 }],
                 mode="payment",
-                success_url=request.host_url + "checkout/success",
-                cancel_url=request.host_url,
+                success_url=request.host_url + "checkout/success?invoice=" + inv_id,
+                cancel_url=request.host_url + "invoice/" + inv_id,
                 metadata={"invoice_id": inv_id}
             )
             return jsonify({"url": session.url, "sessionId": session.id})
@@ -1413,6 +1413,26 @@ def handle_checkout_completed(session_data):
 
 @app.route("/checkout/success")
 def checkout_success():
+    invoice_id = request.args.get("invoice", "")
+    paid_name = ""
+    paid_amount = ""
+    if invoice_id:
+        try:
+            conn = get_db()
+            conn.execute("UPDATE invoices SET status = 'paid', paid_at = datetime('now') WHERE id = ? AND status != 'paid'", (invoice_id,))
+            conn.commit()
+            inv = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+            conn.close()
+            if inv:
+                paid_name = inv[2]
+                paid_amount = inv[4]
+                receipt_num = inv[8]
+                # Send receipt
+                send_email(inv[3], "Receipt - Invoice #" + str(receipt_num) + " Paid", "Hi " + str(inv[2]) + ",\n\nYour invoice #" + str(receipt_num) + " for $" + str(inv[4]) + " has been paid.\n\nThank you for your business!\n\nEmilio\nAutomate Pro")
+                # Notify Emilio
+                send_email("emilio.pegolo1@gmail.com", "Payment Received: Invoice #" + str(receipt_num), "Client: " + str(inv[2]) + "\nAmount: $" + str(inv[4]) + "\nInvoice: #" + str(receipt_num))
+        except Exception as e:
+            pass
     return render_template_string(CHECKOUT_SUCCESS_HTML)
 
 
