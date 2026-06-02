@@ -4648,8 +4648,10 @@ def plumber_demo():
     return render_template_string(PLUMBER_HTML)
 
 
+# Run DB init at import time (gunicorn doesn't run __main__)
+init_db()
+
 if __name__ == "__main__":
-    init_db()
     print("\n" + "=" * 50)
     print("  Automate Pro — Full Business System")
     print("=" * 50)
