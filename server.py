@@ -3508,7 +3508,7 @@ async function markInvoicePaid(id) {
 }
 
 async function cancelSubscription(id) {
-  if (!confirm('Are you sure you want to cancel this subscription?\n\nThis will:\n• Cancel the recurring billing in Stripe\n• Email Emilio to take down the client\'s website\n• Mark the subscription as cancelled')) return;
+  if (!confirm(`Are you sure you want to cancel this subscription?\n\nThis will:\n- Cancel the recurring billing in Stripe\n- Email Emilio to take down the client's website\n- Mark the subscription as cancelled`)) return;
   const res = await fetchJSON('/api/invoices/' + id + '/cancel-subscription', { method: 'POST' });
   if (res && res.success) {
     toast('✅ ' + res.message, 'success');
