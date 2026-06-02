@@ -1860,7 +1860,21 @@ INVOICE_PAGE_HTML = """<!DOCTYPE html>
     </div>
   </div>
 </div>
-</body>
+<script>
+function payInvoiceStripe() {
+  var el = document.getElementById("pay-result");
+  el.textContent = "Processing...";
+  var amt = {{ inv.amount }};
+  fetch("/api/create-checkout-session", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({type:"invoice", amount: Math.round(amt*100), description: "Invoice {{ inv.invoice_number }}", invoice_id: "{{ inv.id }}"})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.url) window.location.href = d.url;
+    else el.textContent = "Error: " + (d.error || "Unknown");
+  }).catch(function(e){el.textContent = "Error: " + e.message;});
+}
+</script></body>
 </html>"""
 
 
