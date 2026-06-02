@@ -675,6 +675,7 @@ def api_send_invoice(invoice_id):
 
 
 @app.route("/invoice/<invoice_id>")
+@app.route("/inv/<inv_num>")
 def public_invoice_view(invoice_id):
     """Public invoice view — no auth required, beautiful printable page."""
     inv = get_invoice_by_id(invoice_id)
@@ -692,6 +693,30 @@ def api_config():
 
 @app.route("/api/create-checkout-session", methods=["POST"])
 def api_create_checkout_session():
+    data = request.get_json() or {}
+    
+    # Support custom invoice payment
+    if data.get("plan") == "custom" and data.get("amount"):
+        try:
+            amount_cents = int(float(data["amount"]) * 100)
+            desc = data.get("description", "Invoice Payment")
+            session = stripe.checkout.Session.create(
+                payment_method_types=["card"],
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {"name": desc},
+                        "unit_amount": amount_cents,
+                    },
+                    "quantity": 1,
+                }],
+                mode="payment",
+                success_url=request.host_url + "checkout/success",
+                cancel_url=request.host_url,
+            )
+            return jsonify({"url": session.url, "sessionId": session.id})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
