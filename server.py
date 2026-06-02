@@ -193,6 +193,25 @@ def init_db():
     """
     )
 
+    # Invoices table
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS invoices (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT,
+            client_name TEXT NOT NULL,
+            client_email TEXT NOT NULL,
+            amount REAL NOT NULL,
+            description TEXT DEFAULT '',
+            status TEXT DEFAULT 'draft',
+            due_date TEXT,
+            invoice_number TEXT UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            paid_at TIMESTAMP
+        )
+    """
+    )
+
     conn.commit()
     conn.close()
 
@@ -269,6 +288,44 @@ def build_notify_body(name, email, business_type, message, timestamp):
         f"Time: {timestamp}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "Auto-response sent: Yes"
+    )
+
+
+# ── Invoice Helpers ──────────────────────────────────────────────────────────
+
+import random
+import string
+
+def generate_invoice_number():
+    """Generate next sequential invoice number (INV-0001 format)."""
+    conn = get_db()
+    row = conn.execute("SELECT invoice_number FROM invoices ORDER BY invoice_number DESC LIMIT 1").fetchone()
+    conn.close()
+    if row and row["invoice_number"]:
+        try:
+            num = int(row["invoice_number"].replace("INV-", ""))
+            return f"INV-{num + 1:04d}"
+        except ValueError:
+            pass
+    return "INV-0001"
+
+
+def get_invoice_by_id(invoice_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def build_invoice_email_body(inv):
+    return (
+        f"Hi {inv['client_name']},\n\n"
+        f"Your invoice #{inv['invoice_number']} for ${inv['amount']:.2f} is ready.\n\n"
+        f"View invoice: https://automatepro.ai/invoice/{inv['id']}\n"
+        f"Due: {inv.get('due_date') or 'Upon receipt'}\n\n"
+        "Thanks,\n"
+        "Emilio\n"
+        "Automate Pro"
     )
 
 
@@ -498,6 +555,132 @@ def logout():
 @login_required
 def dashboard_page():
     return render_template_string(DASHBOARD_HTML)
+
+
+# ── Invoice Endpoints ───────────────────────────────────────────────────────
+
+@app.route("/api/invoices", methods=["GET"])
+@login_required
+def api_list_invoices():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM invoices ORDER BY created_at DESC").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/invoices", methods=["POST"])
+@login_required
+def api_create_invoice():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    client_name = (data.get("client_name") or "").strip()
+    client_email = (data.get("client_email") or "").strip()
+    amount = data.get("amount")
+    description = (data.get("description") or "").strip()
+    due_date = (data.get("due_date") or "").strip()
+    lead_id = (data.get("lead_id") or "").strip()
+
+    if not client_name or not client_email:
+        return jsonify({"error": "Client name and email are required"}), 400
+
+    try:
+        amount = float(amount)
+        if amount <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid amount"}), 400
+
+    invoice_id = str(uuid.uuid4())[:8]
+    invoice_number = generate_invoice_number()
+
+    conn = get_db()
+    conn.execute(
+        """INSERT INTO invoices
+           (id, lead_id, client_name, client_email, amount, description, due_date, invoice_number)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (invoice_id, lead_id, client_name, client_email, amount, description, due_date, invoice_number),
+    )
+    conn.commit()
+    conn.close()
+
+    inv = get_invoice_by_id(invoice_id)
+    return jsonify(inv), 201
+
+
+@app.route("/api/invoices/<invoice_id>", methods=["GET"])
+@login_required
+def api_get_invoice(invoice_id):
+    inv = get_invoice_by_id(invoice_id)
+    if not inv:
+        return jsonify({"error": "Invoice not found"}), 404
+    return jsonify(inv)
+
+
+@app.route("/api/invoices/<invoice_id>", methods=["PUT"])
+@login_required
+def api_update_invoice(invoice_id):
+    inv = get_invoice_by_id(invoice_id)
+    if not inv:
+        return jsonify({"error": "Invoice not found"}), 404
+
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    allowed_updates = {"status", "paid_at", "description", "due_date", "amount"}
+    updates = {k: v for k, v in data.items() if k in allowed_updates}
+
+    if not updates:
+        return jsonify({"error": "No valid fields to update"}), 400
+
+    # If marking as paid, set paid_at
+    if updates.get("status") == "paid" and not inv.get("paid_at"):
+        updates["paid_at"] = datetime.now().isoformat()
+
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    values = list(updates.values()) + [invoice_id]
+
+    conn = get_db()
+    conn.execute(f"UPDATE invoices SET {set_clause} WHERE id = ?", values)
+    conn.commit()
+    conn.close()
+
+    updated = get_invoice_by_id(invoice_id)
+    return jsonify(updated)
+
+
+@app.route("/api/invoices/<invoice_id>/send", methods=["POST"])
+@login_required
+def api_send_invoice(invoice_id):
+    inv = get_invoice_by_id(invoice_id)
+    if not inv:
+        return jsonify({"error": "Invoice not found"}), 404
+
+    subject = f"Invoice #{inv['invoice_number']} from Automate Pro"
+    body = build_invoice_email_body(inv)
+
+    result = send_email(inv["client_email"], subject, body)
+    if result.get("success"):
+        # Update status to sent if it was draft
+        if inv["status"] == "draft":
+            conn = get_db()
+            conn.execute("UPDATE invoices SET status = ? WHERE id = ?", ("sent", invoice_id))
+            conn.commit()
+            conn.close()
+        return jsonify({"success": True, "message": f"Invoice sent to {inv['client_email']}"})
+    else:
+        return jsonify({"error": result.get("error", "Failed to send email")}), 500
+
+
+@app.route("/invoice/<invoice_id>")
+def public_invoice_view(invoice_id):
+    """Public invoice view — no auth required, beautiful printable page."""
+    inv = get_invoice_by_id(invoice_id)
+    if not inv:
+        return render_template_string(INVOICE_NOT_FOUND_HTML)
+    return render_template_string(INVOICE_PAGE_HTML, inv=inv)
 
 
 # ── Stripe Endpoints ────────────────────────────────────────────────────────
@@ -734,6 +917,434 @@ CHECKOUT_SUCCESS_HTML = """<!DOCTYPE html>
   <h1>Payment Successful!</h1>
   <p>We'll be in touch within 24 hours to get you set up.<br>Check your email for a confirmation message.</p>
   <a href="/" class="btn">Back to Home</a>
+</div>
+</body>
+</html>"""
+
+
+INVOICE_NOT_FOUND_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invoice Not Found — Automate Pro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0a0a0f;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .notfound-card {
+    background: #12121a;
+    border: 1px solid #2a2a3a;
+    border-radius: 16px;
+    padding: 60px 48px;
+    width: 100%;
+    max-width: 500px;
+    text-align: center;
+  }
+  .notfound-card .icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+  }
+  .notfound-card h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+  .notfound-card p {
+    color: #888;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .notfound-card .brand {
+    font-size: 14px;
+    font-weight: 800;
+    color: #ff8c42;
+    margin-bottom: 24px;
+  }
+</style>
+</head>
+<body>
+<div class="notfound-card">
+  <div class="brand">Automate Pro</div>
+  <div class="icon">🔍</div>
+  <h1>Invoice Not Found</h1>
+  <p>This invoice doesn't exist or has been removed.<br>If you believe this is an error, please contact us.</p>
+</div>
+</body>
+</html>"""
+
+
+INVOICE_PAGE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invoice {{inv['invoice_number']}} — Automate Pro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface-2: #1a1a26;
+    --border: #2a2a3a;
+    --text: #e0e0e0;
+    --text-muted: #888;
+    --accent: #ff8c42;
+    --green: #00d4aa;
+    --red: #ff4d6a;
+    --blue: #4dabf7;
+  }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 40px 24px;
+  }
+  .invoice-container {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  .invoice-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 48px;
+    position: relative;
+  }
+  .invoice-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 40px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .invoice-header .company {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--accent);
+  }
+  .invoice-header .company-sub {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+  .invoice-header .invoice-number {
+    text-align: right;
+  }
+  .invoice-header .invoice-number .num {
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .invoice-header .invoice-number .label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .invoice-parties {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    margin-bottom: 40px;
+  }
+  .invoice-parties .party h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  .invoice-parties .party .name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .invoice-parties .party .email {
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .invoice-dates {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 40px;
+    padding: 20px;
+    background: var(--surface-2);
+    border-radius: 10px;
+  }
+  .invoice-dates .date-item .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .invoice-dates .date-item .value {
+    font-size: 15px;
+    color: #fff;
+    font-weight: 500;
+  }
+
+  .invoice-items {
+    margin-bottom: 40px;
+  }
+  .invoice-items table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .invoice-items th {
+    text-align: left;
+    padding: 12px 16px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+  }
+  .invoice-items td {
+    padding: 16px;
+    font-size: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .invoice-items td:last-child {
+    text-align: right;
+    font-weight: 600;
+    color: #fff;
+  }
+  .invoice-items td.desc {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .invoice-total {
+    text-align: right;
+    padding-top: 16px;
+    border-top: 2px solid var(--accent);
+    margin-bottom: 32px;
+  }
+  .invoice-total .total-label {
+    font-size: 14px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+  }
+  .invoice-total .total-amount {
+    font-size: 36px;
+    font-weight: 800;
+    color: #fff;
+  }
+
+  .status-badge {
+    display: inline-block;
+    padding: 6px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+  .status-badge.draft { background: rgba(136,136,136,0.15); color: var(--text-muted); }
+  .status-badge.sent { background: rgba(77,171,247,0.15); color: var(--blue); }
+  .status-badge.paid { background: rgba(0,212,170,0.15); color: var(--green); }
+  .status-badge.overdue { background: rgba(255,77,106,0.15); color: var(--red); }
+  .status-badge.cancelled { background: rgba(136,136,136,0.15); color: var(--text-muted); }
+
+  .invoice-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-top: 24px;
+  }
+  .btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn-accent {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-accent:hover {
+    background: #e07a30;
+  }
+  .btn-outline {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .btn-outline:hover {
+    border-color: var(--text-muted);
+  }
+
+  .invoice-footer {
+    text-align: center;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    margin-top: 24px;
+  }
+  .invoice-footer p {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .invoice-footer .thankyou {
+    font-size: 16px;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  @media print {
+    body {
+      background: #fff;
+      color: #000;
+      padding: 0;
+    }
+    .invoice-card {
+      background: #fff;
+      border: none;
+      border-radius: 0;
+      padding: 40px;
+      box-shadow: none;
+    }
+    .invoice-header .company { color: #ff8c42; }
+    .invoice-header .invoice-number .num { color: #000; }
+    .invoice-parties .party .name { color: #000; }
+    .invoice-dates { background: #f5f5f5; }
+    .invoice-dates .date-item .value { color: #000; }
+    .invoice-items td:last-child { color: #000; }
+    .invoice-total .total-amount { color: #000; }
+    .invoice-total { border-top-color: #ff8c42; }
+    .no-print { display: none !important; }
+    .status-badge { border: 1px solid #ddd; }
+    .status-badge.paid { border-color: var(--green); color: #000; }
+  }
+
+  @media (max-width: 600px) {
+    .invoice-card { padding: 24px; }
+    .invoice-header { flex-direction: column; gap: 16px; }
+    .invoice-header .invoice-number { text-align: left; }
+    .invoice-parties { grid-template-columns: 1fr; gap: 20px; }
+    .invoice-dates { grid-template-columns: 1fr; }
+    .invoice-actions { flex-direction: column; align-items: stretch; }
+    .invoice-total .total-amount { font-size: 28px; }
+  }
+</style>
+</head>
+<body>
+<div class="invoice-container">
+  <div class="invoice-card">
+    <!-- Header -->
+    <div class="invoice-header">
+      <div>
+        <div class="company">Automate Pro</div>
+        <div class="company-sub">AI Business Automation</div>
+      </div>
+      <div class="invoice-number">
+        <div class="label">Invoice</div>
+        <div class="num">{{inv['invoice_number']}}</div>
+      </div>
+    </div>
+
+    <!-- Parties -->
+    <div class="invoice-parties">
+      <div class="party">
+        <h3>Bill To</h3>
+        <div class="name">{{inv['client_name']}}</div>
+        <div class="email">{{inv['client_email']}}</div>
+      </div>
+      <div class="party">
+        <h3>From</h3>
+        <div class="name">Automate Pro</div>
+        <div class="email">emilio.pegolo1@gmail.com</div>
+      </div>
+    </div>
+
+    <!-- Dates -->
+    <div class="invoice-dates">
+      <div class="date-item">
+        <div class="label">Invoice Date</div>
+        <div class="value">{{inv['created_at'][:10] if inv['created_at'] else '—'}}</div>
+      </div>
+      <div class="date-item">
+        <div class="label">Due Date</div>
+        <div class="value">{{inv.get('due_date') or 'Upon Receipt'}}</div>
+      </div>
+    </div>
+
+    <!-- Items -->
+    <div class="invoice-items">
+      <table>
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th style="text-align:right;width:120px;">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              {{inv['description'] or 'Professional Automation Service'}}
+              <div class="desc">{{inv['invoice_number']}}</div>
+            </td>
+            <td>${{'{:,.2f}'.format(inv['amount'])}}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Total -->
+    <div class="invoice-total">
+      <div class="total-label">Total Due</div>
+      <div class="total-amount">${{'{:,.2f}'.format(inv['amount'])}}</div>
+      <div style="margin-top:8px;">
+        <span class="status-badge {{inv['status']}}">{{inv['status']}}</span>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="invoice-actions no-print">
+      <button class="btn btn-accent" onclick="window.print()">🖨️ Print / Save PDF</button>
+    </div>
+
+    <!-- Footer -->
+    <div class="invoice-footer">
+      <div class="thankyou">Thank you for your business!</div>
+      <p>Automate Pro — AI-powered business automation solutions</p>
+      <p style="margin-top:4px;">emilio.pegolo1@gmail.com</p>
+    </div>
+  </div>
 </div>
 </body>
 </html>"""
@@ -1227,6 +1838,72 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     animation: slideIn 0.3s ease;
     display: none;
   }
+  /* ── Table card ── */
+  .table-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .data-table th {
+    text-align: left;
+    padding: 14px 20px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+  .data-table td {
+    padding: 14px 20px;
+    font-size: 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .data-table .actions {
+    display: flex;
+    gap: 6px;
+  }
+  .data-table .actions button {
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+  }
+  .data-table .actions button:hover { border-color: var(--accent); color: var(--accent); }
+  .data-table .actions button.send:hover { border-color: var(--blue); color: var(--blue); }
+  .data-table .actions button.pay:hover { border-color: var(--green); color: var(--green); }
+  .data-table .actions button.view-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Invoice status badges */
+  .inv-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+  .inv-badge.draft { background: rgba(136,136,136,0.15); color: var(--text-muted); }
+  .inv-badge.sent { background: rgba(77,171,247,0.15); color: var(--blue); }
+  .inv-badge.paid { background: rgba(0,212,170,0.15); color: var(--green); }
+  .inv-badge.overdue { background: rgba(255,77,106,0.15); color: var(--red); }
+  .inv-badge.cancelled { background: rgba(136,136,136,0.15); color: var(--text-muted); }
+
   .toast.show { display: block; }
   .toast.success { background: rgba(0,212,170,0.15); border: 1px solid var(--green); color: var(--green); }
   .toast.error { background: rgba(255,77,106,0.15); border: 1px solid var(--red); color: var(--red); }
@@ -1240,6 +1917,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div class="brand">Automate Pro</div>
   <nav>
     <a href="#" class="active" onclick="switchTab('dashboard'); return false;">📊 Dashboard</a>
+    <a href="#" onclick="switchTab('invoices'); return false;">📄 Invoices</a>
     <a href="#" onclick="switchTab('revenue'); return false;">💰 Revenue</a>
     <a href="#" onclick="switchTab('pipeline'); return false;">📋 Pipeline</a>
   </nav>
@@ -1265,6 +1943,83 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div class="revenue-grid" id="revenue-grid" style="display:none;">
     <div class="revenue-card"><div class="label">Total Revenue (Closed Won)</div><div class="amount" id="rev-total">$0</div></div>
     <div class="revenue-card"><div class="label">This Month</div><div class="amount" id="rev-month">$0</div></div>
+  </div>
+
+  <!-- ── Invoices Tab ── -->
+  <div id="invoices-tab" style="display:none;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+      <h2 style="margin-bottom:0;">📄 Invoices</h2>
+      <button class="btn btn-accent" onclick="openCreateInvoiceModal()">+ Create Invoice</button>
+    </div>
+    <div class="table-card">
+      <table class="data-table" id="invoices-table">
+        <thead>
+          <tr>
+            <th>Invoice #</th>
+            <th>Client</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th>Date</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="invoices-body">
+          <tr><td colspan="6" class="loading">Loading invoices</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- Create Invoice Modal -->
+<div class="modal-overlay" id="create-invoice-modal">
+  <div class="modal">
+    <button class="close-btn" onclick="closeCreateInvoiceModal()">&times;</button>
+    <h3>Create Invoice</h3>
+    <div class="modal-sub">Generate a new invoice for a client</div>
+    <div class="form-group">
+      <label>Client Name</label>
+      <input type="text" id="inv-client-name" placeholder="Full name">
+    </div>
+    <div class="form-group">
+      <label>Client Email</label>
+      <input type="email" id="inv-client-email" placeholder="client@example.com">
+    </div>
+    <div class="form-group">
+      <label>Amount ($)</label>
+      <input type="number" id="inv-amount" placeholder="0.00" step="0.01" min="0">
+    </div>
+    <div class="form-group">
+      <label>Description</label>
+      <input type="text" id="inv-description" placeholder="Service description (e.g. Automation Setup)">
+    </div>
+    <div class="form-group">
+      <label>Due Date (optional)</label>
+      <input type="date" id="inv-due-date">
+    </div>
+    <div class="form-group" id="inv-lead-group" style="display:none;">
+      <label>Lead ID</label>
+      <input type="text" id="inv-lead-id" readonly style="opacity:0.6;font-size:12px;">
+    </div>
+    <div class="btn-row" style="margin-bottom:0;">
+      <button class="btn btn-accent" onclick="createInvoice()">Generate Invoice</button>
+      <button class="btn btn-outline" onclick="closeCreateInvoiceModal()">Cancel</button>
+    </div>
+    <div class="email-result" id="create-invoice-result"></div>
+  </div>
+</div>
+
+<!-- Confirm Invoice Modal -->
+<div class="modal-overlay" id="confirm-invoice-modal">
+  <div class="modal" style="max-width:420px;">
+    <button class="close-btn" onclick="document.getElementById('confirm-invoice-modal').classList.remove('open')">&times;</button>
+    <h3 id="confirm-title">Confirm</h3>
+    <p style="color:#888;font-size:14px;margin:8px 0 24px;" id="confirm-msg"></p>
+    <div class="btn-row" style="margin-bottom:0;">
+      <button class="btn btn-accent" id="confirm-yes-btn" onclick="">Yes</button>
+      <button class="btn btn-outline" onclick="document.getElementById('confirm-invoice-modal').classList.remove('open')">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -1294,6 +2049,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       </select>
       <button class="btn btn-green btn-sm" onclick="markWon()">💰 Won</button>
       <button class="btn btn-red btn-sm" onclick="markLost()">✕ Lost</button>
+      <button class="btn btn-outline btn-sm" onclick="createInvoiceForLead()">📄 Invoice</button>
     </div>
 
     <div class="form-group">
@@ -1563,10 +2319,161 @@ async function sendEmailToLead() {
   }
 }
 
+// ── Invoice Functions ──
+
+async function loadInvoices() {
+  const invs = await fetchJSON('/api/invoices');
+  if (!invs) return;
+  const tbody = $('invoices-body');
+  if (invs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;padding:40px;">No invoices yet. Create your first one!</td></tr>';
+    return;
+  }
+  tbody.innerHTML = invs.map(inv => {
+    const statusClass = inv.status || 'draft';
+    const dateStr = inv.created_at ? inv.created_at.slice(0, 10) : '—';
+    const leadAttr = inv.lead_id ? `data-lead="${inv.lead_id}"` : '';
+    return `<tr ${leadAttr}>
+      <td style="font-weight:600;color:#fff;">${escapeHtml(inv.invoice_number)}</td>
+      <td>
+        <div style="font-weight:500;">${escapeHtml(inv.client_name)}</div>
+        <div style="font-size:12px;color:#888;">${escapeHtml(inv.client_email)}</div>
+      </td>
+      <td style="font-weight:600;color:#fff;">$${Number(inv.amount).toLocaleString('en-AU', {minimumFractionDigits:2})}</td>
+      <td><span class="inv-badge ${statusClass}">${statusClass}</span></td>
+      <td style="color:#888;font-size:13px;">${dateStr}</td>
+      <td>
+        <div class="actions">
+          <button class="view-btn" onclick="window.open('/invoice/${inv.id}','_blank')">👁️ View</button>
+          ${statusClass !== 'paid' && statusClass !== 'cancelled' ? `<button class="send" onclick="sendInvoice('${inv.id}')">📧 Send</button>` : ''}
+          ${statusClass === 'sent' ? `<button class="pay" onclick="markInvoicePaid('${inv.id}')">✅ Paid</button>` : ''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function sendInvoice(id) {
+  const res = await fetchJSON('/api/invoices/' + id + '/send', { method: 'POST' });
+  if (res && res.success) {
+    toast('✅ ' + res.message, 'success');
+    loadInvoices();
+  } else {
+    toast('❌ ' + (res ? res.error : 'Failed to send'), 'error');
+  }
+}
+
+async function markInvoicePaid(id) {
+  const res = await fetchJSON('/api/invoices/' + id, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'paid' })
+  });
+  if (res) {
+    toast('✅ Invoice marked as paid', 'success');
+    loadInvoices();
+  } else {
+    toast('❌ Failed to update invoice', 'error');
+  }
+}
+
+function openCreateInvoiceModal() {
+  $('inv-client-name').value = '';
+  $('inv-client-email').value = '';
+  $('inv-amount').value = '';
+  $('inv-description').value = '';
+  $('inv-due-date').value = '';
+  $('inv-lead-id').value = '';
+  $('inv-lead-group').style.display = 'none';
+  $('create-invoice-result').className = 'email-result';
+  $('create-invoice-result').textContent = '';
+  $('create-invoice-modal').classList.add('open');
+}
+
+function closeCreateInvoiceModal() {
+  $('create-invoice-modal').classList.remove('open');
+}
+
+function createInvoiceForLead() {
+  if (!currentLeadId) return;
+  // Fetch lead details to pre-fill
+  fetchJSON('/api/lead/' + currentLeadId).then(lead => {
+    if (!lead) return;
+    $('inv-client-name').value = lead.name || '';
+    $('inv-client-email').value = lead.email || '';
+    $('inv-amount').value = '';
+    $('inv-description').value = '';
+    $('inv-due-date').value = '';
+    $('inv-lead-id').value = currentLeadId;
+    $('inv-lead-group').style.display = 'block';
+    $('create-invoice-result').className = 'email-result';
+    $('create-invoice-result').textContent = '';
+    $('create-invoice-modal').classList.add('open');
+    closeModal();
+  });
+}
+
+async function createInvoice() {
+  const name = $('inv-client-name').value.trim();
+  const email = $('inv-client-email').value.trim();
+  const amount = parseFloat($('inv-amount').value);
+  const desc = $('inv-description').value.trim();
+  const due = $('inv-due-date').value;
+  const leadId = $('inv-lead-id').value;
+  const resultDiv = $('create-invoice-result');
+
+  if (!name || !email) {
+    resultDiv.textContent = 'Please enter client name and email.';
+    resultDiv.className = 'email-result error';
+    return;
+  }
+  if (!amount || amount <= 0) {
+    resultDiv.textContent = 'Please enter a valid amount.';
+    resultDiv.className = 'email-result error';
+    return;
+  }
+
+  resultDiv.textContent = 'Creating invoice...';
+  resultDiv.className = 'email-result';
+  resultDiv.style.display = 'block';
+
+  const body = {
+    client_name: name,
+    client_email: email,
+    amount: amount,
+    description: desc,
+    due_date: due
+  };
+  if (leadId) body.lead_id = leadId;
+
+  const res = await fetchJSON('/api/invoices', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (res && !res.error) {
+    resultDiv.textContent = '✅ Invoice ' + (res.invoice_number || '') + ' created!';
+    resultDiv.className = 'email-result success';
+    toast('Invoice ' + (res.invoice_number || '') + ' created!', 'success');
+    closeCreateInvoiceModal();
+    loadInvoices();
+  } else {
+    resultDiv.textContent = '❌ ' + (res ? res.error : 'Failed to create invoice');
+    resultDiv.className = 'email-result error';
+  }
+}
+
+
 // ── Tab switching ──
 function switchTab(tab) {
   document.querySelectorAll('.sidebar nav a').forEach(a => a.classList.remove('active'));
   event.target.classList.add('active');
+
+  // Hide all non-sidebar panels first
+  $('invoices-tab').style.display = 'none';
+  document.querySelectorAll('.section-title, .revenue-title').forEach(el => el.style.display = 'none');
+  $('main-content').querySelector('h2').style.display = 'block';
 
   if (tab === 'dashboard') {
     $('main-content').querySelector('h2').textContent = '📊 Dashboard';
@@ -1585,8 +2492,19 @@ function switchTab(tab) {
     $('revenue-title').style.display = 'block';
     $('revenue-grid').style.display = 'grid';
     loadDashboard();
+  } else if (tab === 'invoices') {
+    $('main-content').querySelector('h2').style.display = 'none';
+    $('stats-grid').style.display = 'none';
+    document.querySelector('.section-title').style.display = 'none';
+    $('kanban').style.display = 'none';
+    $('revenue-title').style.display = 'none';
+    $('revenue-grid').style.display = 'none';
+    $('invoices-tab').style.display = 'block';
+    loadInvoices();
   } else if (tab === 'pipeline') {
     $('main-content').querySelector('h2').textContent = '📋 Pipeline';
+    $('main-content').querySelector('h2').style.display = 'block';
+    $('invoices-tab').style.display = 'none';
     $('stats-grid').style.display = 'none';
     document.querySelector('.section-title').textContent = 'Full Pipeline';
     document.querySelector('.section-title').style.display = 'block';
@@ -1611,6 +2529,7 @@ document.addEventListener('keydown', function(e) {
 });
 
 // ── Init ──
+$('invoices-tab').style.display = 'none';
 loadDashboard();
 </script>
 </body>
@@ -1662,6 +2581,12 @@ if __name__ == "__main__":
     print("    PUT  /api/lead/<id>        — Update lead (auth)")
     print("    GET  /api/lead/<id>        — Get lead (auth)")
     print("    POST /api/lead/<id>/send-email — Email lead (auth)")
+    print("    GET  /api/invoices         — List invoices (auth)")
+    print("    POST /api/invoices         — Create invoice (auth)")
+    print("    GET  /api/invoices/<id>    — Get invoice (auth)")
+    print("    PUT  /api/invoices/<id>    — Update invoice (auth)")
+    print("    POST /api/invoices/<id>/send — Send invoice email (auth)")
+    print("    GET  /invoice/<id>         — Public invoice view")
     print("    GET  /login                — Login page")
     print("    POST /login                — Login action")
     print("    POST /logout               — Logout")
