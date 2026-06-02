@@ -2665,6 +2665,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     <div class="btn-row" style="margin-bottom:0;">
       <button class="btn btn-accent" onclick="createInvoice()">Generate Invoice</button>
+      <button class="btn btn-green" onclick="createAndSendInvoice()" style="background:#00d4aa;color:#0a0a0f;border:none;padding:10px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Create &amp; Send</button>
       <button class="btn btn-outline" onclick="closeCreateInvoiceModal()">Cancel</button>
     </div>
     <div class="email-result" id="create-invoice-result"></div>
@@ -3210,6 +3211,38 @@ async function createInvoice() {
     loadInvoices();
   } else {
     resultDiv.textContent = '❌ ' + (res ? res.error : 'Failed to create invoice');
+    resultDiv.className = 'email-result error';
+  }
+}
+
+async function createAndSendInvoice() {
+  const name = $('inv-client-name').value.trim();
+  const email = $('inv-client-email').value.trim();
+  const amount = parseFloat($('inv-amount').value);
+  const desc = $('inv-description').value.trim();
+  const due = $('inv-due-date').value;
+  const resultDiv = $('create-invoice-result');
+  if (!name || !email) { resultDiv.textContent = 'Please fill in name and email'; resultDiv.className = 'email-result error'; return; }
+  if (!amount || amount <= 0) { resultDiv.textContent = 'Invalid amount'; resultDiv.className = 'email-result error'; return; }
+  resultDiv.textContent = 'Creating and sending...'; resultDiv.className = 'email-result'; resultDiv.style.display = 'block';
+  const res = await fetchJSON('/api/invoices', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({client_name:name, client_email:email, amount:amount, description:desc, due_date:due}) });
+  if (res && !res.error) {
+    resultDiv.textContent = '✅ Invoice created! Now sending...';
+    const sendResult = await fetchJSON('/api/invoices/' + res.id + '/send', { method:'POST' });
+    if (sendResult && sendResult.success) {
+      resultDiv.textContent = '✅ Invoice sent to ' + email + ' with Stripe payment link!';
+      resultDiv.className = 'email-result success';
+      toast('Invoice created and sent!', 'success');
+      closeCreateInvoiceModal();
+      loadInvoices();
+    } else {
+      resultDiv.textContent = '✅ Invoice created but send failed: ' + (sendResult ? sendResult.error : 'Unknown');
+      resultDiv.className = 'email-result error';
+      closeCreateInvoiceModal();
+      loadInvoices();
+    }
+  } else {
+    resultDiv.textContent = '❌ ' + (res ? res.error : 'Failed');
     resultDiv.className = 'email-result error';
   }
 }
