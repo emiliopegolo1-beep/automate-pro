@@ -1302,6 +1302,53 @@ def api_create_checkout_session():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/calendly-webhook", methods=["POST"])
+def api_calendly_webhook():
+    """Receive Calendly webhook when someone books a call."""
+    try:
+        data = request.get_json(silent=True) or {}
+        payload = data.get("payload", {})
+        event_type = data.get("event", "")
+        
+        # Only process when a new event is created (call booked)
+        if "invitee.created" in event_type or "invitee.canceled" in event_type:
+            invitee = payload.get("invitee", {}) or {}
+            email = invitee.get("email", "")
+            name = invitee.get("name", "")
+            start_time = payload.get("event", {}).get("start_time", "") if payload.get("event") else ""
+            
+            if email:
+                conn = get_db()
+                # Find the lead by email
+                lead = conn.execute(
+                    "SELECT id, status FROM leads WHERE email = ? ORDER BY created_at DESC LIMIT 1",
+                    (email,)
+                ).fetchone()
+                
+                if lead:
+                    if "invitee.created" in event_type:
+                        new_status = "call_scheduled"
+                        # Format the follow-up date from the start_time
+                        follow_up = start_time[:10] if start_time else ""
+                        conn.execute(
+                            "UPDATE leads SET status = ?, follow_up_date = ? WHERE id = ?",
+                            (new_status, follow_up, lead[0])
+                        )
+                        conn.commit()
+                    elif "invitee.canceled" in event_type:
+                        conn.execute(
+                            "UPDATE leads SET status = 'new' WHERE id = ? AND status = 'call_scheduled'",
+                            (lead[0],)
+                        )
+                        conn.commit()
+                
+                conn.close()
+        
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 200  # Return 200 so Calendly doesn't retry
+
+
 @app.route("/api/stripe-webhook", methods=["POST"])
 def api_stripe_webhook():
     """Handle Stripe webhook events (no signature verification in test mode)."""
@@ -4253,7 +4300,7 @@ if __name__ == "__main__":
     print("    GET  /api/config           — Get Stripe public key")
     print("    POST /api/create-checkout-session — Create Stripe checkout")
     print("    POST /api/stripe-webhook   — Stripe webhook (test mode)")
-    print("    GET  /api/dashboard        — Dashboard stats (auth)")
+    print("    POST /api/calendly-webhook — Calendly webhook (auto-update lead status)")    print("    GET  /api/dashboard        — Dashboard stats (auth)")
     print("    PUT  /api/lead/<id>        — Update lead (auth)")
     print("    GET  /api/lead/<id>        — Get lead (auth)")
     print("    POST /api/lead/<id>/send-email — Email lead (auth)")
