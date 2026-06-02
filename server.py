@@ -21,21 +21,48 @@ from flask import (
     render_template_string,
 )
 
-# Email integration — SMTP (works everywhere, no local token needed)
-import smtplib
-import threading
+# Email integration — Gmail API (uses stored refresh token, no SMTP needed)
+import base64
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 from email.mime.text import MIMEText
 
-SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASS = os.environ.get("SMTP_PASS", "")
+GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "")
+GMAIL_CLIENT_ID = os.environ.get("GMAIL_CLIENT_ID", "")
+GMAIL_CLIENT_SECRET = os.environ.get("GMAIL_CLIENT_SECRET", "")
+
+def _get_gmail_service():
+    if not GMAIL_REFRESH_TOKEN:
+        return None
+    creds = Credentials(
+        token=None,
+        refresh_token=GMAIL_REFRESH_TOKEN,
+        client_id=GMAIL_CLIENT_ID,
+        client_secret=GMAIL_CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=["https://www.googleapis.com/auth/gmail.readonly",
+                "https://www.googleapis.com/auth/gmail.send"]
+    )
+    return build("gmail", "v1", credentials=creds)
 
 def send_email(to, subject, body):
-    """Send email asynchronously — returns immediately."""
-    t = threading.Thread(target=send_email_sync, args=(to, subject, body), daemon=True)
-    t.start()
-    return {"success": True, "async": True}
+    """Send email via Gmail API using stored refresh token."""
+    service = _get_gmail_service()
+    if not service:
+        print("[EMAIL DISABLED] Set GMAIL_REFRESH_TOKEN env var to enable")
+        return {"success": False, "error": "Gmail not configured"}
+    try:
+        msg = MIMEText(body)
+        msg["To"] = to
+        msg["Subject"] = subject
+        msg["From"] = "me"
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        return {"success": True}
+    except Exception as e:
+        print(f"[GMAIL ERROR] {e}")
+        return {"success": False, "error": str(e)}
+
 def send_email_sync(to, subject, body):
     """Send email via SMTP. Works on Railway with app password."""
     if not SMTP_USER or not SMTP_PASS:
