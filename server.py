@@ -89,6 +89,11 @@ app.secret_key = os.urandom(32).hex()
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "leads.db")
 NOTIFY_EMAIL = "emilio.pegolo1@gmail.com"
 DASHBOARD_PASSWORD = "automate2026"
+DOMAIN = "automate-pro-production.up.railway.app"
+
+CLIENT_CREDENTIALS = {
+    "bob": {"name": "Bob's Plumbing", "password": "plumb2026", "notify_email": "bob@bobsplumbing.com"},
+}
 
 # ── Stripe Configuration ─────────────────────────────────────────────────────
 
@@ -171,8 +176,16 @@ def init_db():
         ("requirements", "TEXT DEFAULT ''"),
         ("quoted_price", "REAL DEFAULT 0"),
         ("follow_up_date", "TEXT DEFAULT ''"),
-        ("source", "TEXT DEFAULT 'website'"),
+        ("source", "TEXT DEFAULT 'automate_pro'"),
     ]
+    extra_client_cols = [
+        ("notify_email", "TEXT DEFAULT ''"),
+    ]
+    for col_name, col_def in extra_client_cols:
+        try:
+            conn.execute(f"ALTER TABLE leads ADD COLUMN {col_name} {col_def}")
+        except sqlite3.OperationalError:
+            pass
     for col_name, col_def in columns_to_add:
         try:
             conn.execute(f"ALTER TABLE leads ADD COLUMN {col_name} {col_def}")
@@ -220,11 +233,13 @@ def init_db():
     conn.close()
 
 
-def save_lead(lead_id, name, email, business_type, message, phone=""):
+def save_lead(lead_id, name, email, business_type, message, phone="", source="", notify_email=""):
     conn = get_db()
+    if not source:
+        source = "automate_pro"
     conn.execute(
-        "INSERT INTO leads (id, name, email, business_type, message, phone) VALUES (?, ?, ?, ?, ?, ?)",
-        (lead_id, name, email, business_type, message, phone),
+        "INSERT INTO leads (id, name, email, business_type, message, phone, source, notify_email) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (lead_id, name, email, business_type, message, phone, source, notify_email),
     )
     conn.commit()
     conn.close()
@@ -239,7 +254,7 @@ def get_lead_by_id(lead_id):
 
 def update_lead_in_db(lead_id, updates):
     """Update lead columns. `updates` is a dict of column → value."""
-    allowed = {"name", "email", "business_type", "phone", "status", "notes", "revenue", "requirements", "quoted_price", "follow_up_date", "source"}
+    allowed = {"name", "email", "business_type", "phone", "status", "notes", "revenue", "requirements", "quoted_price", "follow_up_date", "source", "notify_email"}
     filtered = {k: v for k, v in updates.items() if k in allowed}
     if not filtered:
         return False
@@ -366,14 +381,27 @@ def api_lead():
     phone = (data.get("phone") or "").strip()
     business_type = (data.get("business_type") or "").strip()
     message = (data.get("message") or "").strip()
+    raw_notify_email = (data.get("notify_email") or "").strip()
 
     if not name or not email:
         return jsonify({"error": "Name and email are required"}), 400
 
+    # Determine source and resolve client
+    notify_email = ""
+    source = "automate_pro"
+    matched_client_id = None
+    if raw_notify_email:
+        for client_id, creds in CLIENT_CREDENTIALS.items():
+            if creds["notify_email"] == raw_notify_email:
+                source = f"client:{client_id}"
+                notify_email = raw_notify_email
+                matched_client_id = client_id
+                break
+
     lead_id = str(uuid.uuid4())[:8]
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    save_lead(lead_id, name, email, business_type, message, phone)
+    save_lead(lead_id, name, email, business_type, message, phone, source, notify_email)
 
     gmail_errors = []
 
@@ -389,11 +417,32 @@ def api_lead():
     # Notify Emilio
     notify_subject = f"\U0001f680 New Lead: {name} - {business_type or 'N/A'}"
     notify_body = build_notify_body(name, email, business_type, message, timestamp)
+    if source.startswith("client:"):
+        notify_body += "\nSource: Client Portal " + source
     result = send_email(NOTIFY_EMAIL, notify_subject, notify_body)
     if result.get("success"):
         mark_notified(lead_id)
     else:
         gmail_errors.append(f"Notify failed: {result.get('error')}")
+
+    # Notify the client if this is a client lead
+    if matched_client_id and notify_email:
+        client_creds = CLIENT_CREDENTIALS[matched_client_id]
+        client_notify_subject = f"\U0001f4ac New Lead: {name} - {business_type or 'Inquiry'}"
+        client_notify_body = (
+            f"Hi {client_creds['name']},\n\n"
+            f"You have a new lead from your website:\n\n"
+            f"Name: {name}\n"
+            f"Email: {email}\n"
+            f"Phone: {phone or '(not provided)'}\n"
+            f"Service: {business_type or 'N/A'}\n"
+            f"Message: {message or '(none)'}\n"
+            f"Time: {timestamp}\n\n"
+            f"View all leads: https://{DOMAIN}/portal/{matched_client_id}\n"
+        )
+        result = send_email(notify_email, client_notify_subject, client_notify_body)
+        if not result.get("success"):
+            gmail_errors.append(f"Client notify failed: {result.get('error')}")
 
     response = {"success": True, "lead_id": lead_id, "name": name}
     if gmail_errors:
@@ -417,13 +466,18 @@ def api_leads():
 @login_required
 def api_dashboard():
     conn = get_db()
+    include_all = request.args.get("include_all", "false").lower() == "true"
+
+    source_filter = ""
+    if not include_all:
+        source_filter = "WHERE source = 'automate_pro'"
 
     # Total leads
-    total_leads = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
+    total_leads = conn.execute(f"SELECT COUNT(*) FROM leads {source_filter}").fetchone()[0]
 
     # Leads by status
     status_rows = conn.execute(
-        "SELECT status, COUNT(*) as cnt FROM leads GROUP BY status"
+        f"SELECT status, COUNT(*) as cnt FROM leads {source_filter} GROUP BY status"
     ).fetchall()
     leads_by_status = {r["status"]: r["cnt"] for r in status_rows}
     for s in ("new", "call_scheduled", "call_done", "building", "demo_ready", "delivered", "paid"):
@@ -443,8 +497,9 @@ def api_dashboard():
 
     # New this week
     week_ago = (date.today() - timedelta(days=7)).isoformat()
+    source_clause_week = "" if include_all else "AND source = 'automate_pro'"
     new_this_week = conn.execute(
-        "SELECT COUNT(*) FROM leads WHERE created_at >= ?", (week_ago,)
+        f"SELECT COUNT(*) FROM leads WHERE created_at >= ? {source_clause_week}", (week_ago,)
     ).fetchone()[0]
 
     # Conversion rate (delivered+paid / touched leads)
@@ -461,7 +516,7 @@ def api_dashboard():
 
     # Recent leads (last 5)
     recent = conn.execute(
-        "SELECT * FROM leads ORDER BY created_at DESC LIMIT 5"
+        f"SELECT * FROM leads {source_filter} ORDER BY created_at DESC LIMIT 5"
     ).fetchall()
 
     conn.close()
@@ -483,6 +538,7 @@ def api_dashboard():
             "pending_delivery": pending_delivery,
             "active_clients": active_clients,
             "recent_leads": [dict(r) for r in recent],
+            "filtering": not include_all,
         }
     )
 
@@ -558,6 +614,426 @@ def login_post():
 @app.route("/logout", methods=["POST"])
 def logout():
     session.pop("logged_in", None)
+    return jsonify({"success": True})
+
+
+# ── Client Portal Routes ────────────────────────────────────────────────────
+
+
+CLIENT_PORTAL_LOGIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{client_name}} — Lead Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface-2: #1a1a26;
+    --border: #2a2a3a;
+    --text: #e0e0e0;
+    --text-muted: #888;
+    --accent: #ff8c42;
+    --accent-hover: #e07a30;
+    --green: #00d4aa;
+  }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .login-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 48px 40px;
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+  }
+  .login-card .brand-icon { font-size: 48px; margin-bottom: 12px; }
+  .login-card h1 { font-size: 22px; margin-bottom: 4px; color: #fff; }
+  .login-card .subtitle { color: var(--text-muted); font-size: 14px; margin-bottom: 28px; }
+  .login-card input {
+    width: 100%;
+    padding: 14px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: #fff;
+    font-size: 16px;
+    outline: none;
+    transition: border-color 0.2s;
+    margin-bottom: 16px;
+  }
+  .login-card input:focus { border-color: var(--accent); }
+  .login-card input::placeholder { color: #666; }
+  .login-card button {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .login-card button:hover { background: var(--accent-hover); }
+  .login-card .error { color: #ff4d4d; font-size: 14px; margin-top: 12px; display: none; }
+</style>
+</head>
+<body>
+<div class="login-card">
+  <div class="brand-icon">🔑</div>
+  <h1>{{client_name}}</h1>
+  <p class="subtitle">Enter your password to view your leads</p>
+  <input type="password" id="password" placeholder="Portal Password" autocomplete="current-password">
+  <button onclick="login()">Sign In</button>
+  <div class="error" id="error"></div>
+</div>
+<script>
+document.getElementById('password').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') login();
+});
+async function login() {
+  const pwd = document.getElementById('password').value;
+  const err = document.getElementById('error');
+  if (!pwd) { err.textContent = 'Please enter your password'; err.style.display = 'block'; return; }
+  try {
+    const res = await fetch('/portal/{{client_id}}/login', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({password:pwd})
+    });
+    const data = await res.json();
+    if (data.success) { window.location.href = '/portal/{{client_id}}'; }
+    else { err.textContent = 'Invalid password'; err.style.display = 'block'; }
+  } catch(e) { err.textContent = 'Connection error'; err.style.display = 'block'; }
+}
+</script>
+</body>
+</html>"""
+
+CLIENT_PORTAL_DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{client_name}} — Lead Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface-2: #1a1a26;
+    --border: #2a2a3a;
+    --text: #e0e0e0;
+    --text-muted: #888;
+    --accent: #ff8c42;
+    --accent-hover: #e07a30;
+    --green: #00d4aa;
+  }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 40px 24px;
+  }
+  .container { max-width: 1000px; margin: 0 auto; }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 32px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .header-left .icon { font-size: 32px; }
+  .header-left h1 { font-size: 24px; font-weight: 700; color: #fff; }
+  .header-left .sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+  .header .logout-btn {
+    padding: 10px 20px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+    text-decoration: none;
+  }
+  .header .logout-btn:hover { color: #ff4d6a; border-color: #ff4d6a; }
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+  }
+  .stat-card .label { font-size: 13px; color: var(--text-muted); font-weight: 500; margin-bottom: 6px; }
+  .stat-card .value { font-size: 32px; font-weight: 700; color: #fff; }
+  .stat-card.accent .value { color: var(--accent); }
+  .stat-card.green .value { color: var(--green); }
+  .table-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .data-table th {
+    text-align: left;
+    padding: 14px 20px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+  .data-table td {
+    padding: 14px 20px;
+    font-size: 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .data-table .empty-state {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--text-muted);
+  }
+  .data-table .empty-state .big-icon { font-size: 48px; margin-bottom: 12px; }
+  .data-table .empty-state p { font-size: 15px; }
+  .badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+  .badge-new { background: rgba(77,171,247,0.15); color: #4dabf7; }
+  .badge-contacted { background: rgba(255,212,59,0.15); color: #ffd43b; }
+  .badge-closed { background: rgba(0,212,170,0.15); color: var(--green); }
+  .badge-default { background: rgba(136,136,136,0.15); color: var(--text-muted); }
+  .footer {
+    text-align: center;
+    padding: 24px;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 32px;
+    border-top: 1px solid var(--border);
+  }
+  .footer a { color: var(--accent); text-decoration: none; font-weight: 600; }
+  @media (max-width: 600px) {
+    .header { flex-direction: column; gap: 16px; text-align: center; }
+    .stats-row { grid-template-columns: 1fr; }
+    .data-table { font-size: 13px; }
+    .data-table th, .data-table td { padding: 10px 12px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="header-left">
+      <div class="icon">📋</div>
+      <div>
+        <h1>{{client_name}}</h1>
+        <div class="sub">Lead Dashboard</div>
+      </div>
+    </div>
+    <button class="logout-btn" onclick="logout()">🚪 Sign Out</button>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="label">Total Leads</div><div class="value" id="stat-total">—</div></div>
+    <div class="stat-card green"><div class="label">This Month</div><div class="value" id="stat-month">—</div></div>
+  </div>
+
+  <div class="table-card">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Phone</th>
+          <th>Email</th>
+          <th>Service</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody id="leads-body">
+        <tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-muted);">Loading leads...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    Powered by <a href="/">Automate Pro</a>
+  </div>
+</div>
+
+<script>
+async function loadLeads() {
+  const res = await fetch('/portal/{{client_id}}/api/leads');
+  const data = await res.json();
+  const tbody = document.getElementById('leads-body');
+
+  if (!data.leads || data.leads.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state">
+      <div class="big-icon">📭</div>
+      <p>No leads yet. When someone contacts you from your website, they'll show up here.</p>
+    </td></tr>`;
+    document.getElementById('stat-total').textContent = '0';
+    document.getElementById('stat-month').textContent = '0';
+    return;
+  }
+
+  document.getElementById('stat-total').textContent = data.total;
+  document.getElementById('stat-month').textContent = data.this_month;
+
+  const now = new Date();
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  tbody.innerHTML = data.leads.map(lead => {
+    let dateStr = '—';
+    if (lead.created_at) {
+      const d = new Date(lead.created_at);
+      dateStr = d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+    }
+    return `<tr>
+      <td style="font-weight:600;">${escapeHtml(lead.name)}</td>
+      <td>${escapeHtml(lead.phone || '—')}</td>
+      <td><a href="mailto:${escapeHtml(lead.email)}" style="color:var(--accent);text-decoration:none;">${escapeHtml(lead.email)}</a></td>
+      <td>${escapeHtml(lead.business_type || '—')}</td>
+      <td style="color:var(--text-muted);font-size:13px;">${dateStr}</td>
+    </tr>`;
+  }).join('');
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+async function logout() {
+  await fetch('/portal/{{client_id}}/logout', { method: 'POST' });
+  window.location.href = '/portal/{{client_id}}';
+}
+
+loadLeads();
+</script>
+</body>
+</html>"""
+
+
+def get_client_portal_leads(client_id):
+    source_prefix = f"client:{client_id}"
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM leads WHERE source = ? ORDER BY created_at DESC",
+        (source_prefix,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.route("/portal/<client_id>", methods=["GET"])
+def client_portal(client_id):
+    if client_id not in CLIENT_CREDENTIALS:
+        return "Portal not found", 404
+
+    creds = CLIENT_CREDENTIALS[client_id]
+    client_name = creds["name"]
+
+    # Check if already logged in
+    if session.get(f"portal_{client_id}"):
+        leads = get_client_portal_leads(client_id)
+        total = len(leads)
+        now = datetime.now()
+        this_month = sum(
+            1 for l in leads
+            if l.get("created_at") and l["created_at"][:7] == now.strftime("%Y-%m")
+        )
+        return render_template_string(
+            CLIENT_PORTAL_DASHBOARD_HTML,
+            client_id=client_id,
+            client_name=client_name,
+        )
+    else:
+        return render_template_string(
+            CLIENT_PORTAL_LOGIN_HTML,
+            client_id=client_id,
+            client_name=client_name,
+        )
+
+
+@app.route("/portal/<client_id>/login", methods=["POST"])
+def client_portal_login(client_id):
+    if client_id not in CLIENT_CREDENTIALS:
+        return jsonify({"error": "Invalid portal"}), 404
+
+    data = request.get_json(silent=True) or {}
+    password = data.get("password", "")
+
+    if password == CLIENT_CREDENTIALS[client_id]["password"]:
+        session[f"portal_{client_id}"] = True
+        return jsonify({"success": True})
+    return jsonify({"error": "Invalid password"}), 401
+
+
+@app.route("/portal/<client_id>/api/leads", methods=["GET"])
+def client_portal_api_leads(client_id):
+    if client_id not in CLIENT_CREDENTIALS:
+        return jsonify({"error": "Invalid portal"}), 404
+    if not session.get(f"portal_{client_id}"):
+        return jsonify({"error": "Not authenticated"}), 401
+
+    leads = get_client_portal_leads(client_id)
+    total = len(leads)
+    now = datetime.now()
+    this_month = sum(
+        1 for l in leads
+        if l.get("created_at") and l["created_at"][:7] == now.strftime("%Y-%m")
+    )
+    return jsonify({"leads": leads, "total": total, "this_month": this_month})
+
+
+@app.route("/portal/<client_id>/logout", methods=["POST"])
+def client_portal_logout(client_id):
+    session.pop(f"portal_{client_id}", None)
     return jsonify({"success": True})
 
 
@@ -1588,6 +2064,37 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   }
   .section-title:first-of-type { margin-top: 0; }
 
+  /* ── Source Toggle ── */
+  .source-toggle {
+    display: flex;
+    gap: 0;
+    margin-bottom: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    width: fit-content;
+  }
+  .source-toggle .toggle-btn {
+    padding: 10px 24px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+    border-right: 1px solid var(--border);
+  }
+  .source-toggle .toggle-btn:last-child { border-right: none; }
+  .source-toggle .toggle-btn:hover { color: var(--text); background: var(--surface-2); }
+  .source-toggle .toggle-btn.active {
+    color: var(--accent);
+    background: rgba(255,140,66,0.1);
+    font-weight: 600;
+  }
+
   /* ── Stats cards ── */
   .stats-grid {
     display: grid;
@@ -1972,6 +2479,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <!-- Main content -->
 <div class="main" id="main-content">
   <h2>📊 Dashboard</h2>
+  <div class="source-toggle" id="source-toggle">
+    <button class="toggle-btn active" data-filter="my" onclick="setSourceFilter('my')">My Leads</button>
+    <button class="toggle-btn" data-filter="all" onclick="setSourceFilter('all')">All Clients</button>
+  </div>
   <div class="stats-grid" id="stats-grid">
     <div class="stat-card"><div class="label">Total Leads</div><div class="value" id="stat-total">—</div></div>
     <div class="stat-card green"><div class="label">New This Week</div><div class="value" id="stat-week">—</div></div>
@@ -2148,6 +2659,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 <script>
 let currentLeadId = null;
+let currentFilter = 'my';
 const STATUS_LABELS = {
   'new': 'New',
   'call_scheduled': 'Call Scheduled',
@@ -2187,8 +2699,17 @@ async function fetchJSON(url, opts) {
 }
 
 // ── Dashboard loading ──
+function setSourceFilter(mode) {
+  currentFilter = mode;
+  document.querySelectorAll('.source-toggle .toggle-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === mode);
+  });
+  loadDashboard();
+}
+
 async function loadDashboard() {
-  const data = await fetchJSON('/api/dashboard');
+  const url = '/api/dashboard' + (currentFilter === 'all' ? '?include_all=true' : '');
+  const data = await fetchJSON(url);
   if (!data) return;
 
   $('stat-total').textContent = data.total_leads;
@@ -3533,28 +4054,18 @@ async function submitQuote(e) {
   result.textContent = '';
 
   try {
-    const res = await fetch('/api/lead', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    name: formData.get('name'),
-                    email: formData.get('email'),
-                    phone: formData.get('phone'),
-                    business_type: 'Trades & Construction',
-                    message: formData.get('message') || formData.get('description'),
-                    notify_email: 'bob@bobsplumbing.com'
-                })
-            })
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: name,
-        phone: phone,
-        email: email,
-        business_type: 'Trades & Construction',
-        message: 'Service: ' + service + (message ? ' — ' + message : '')
-      })
-    });
+      const res = await fetch('/api/lead', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          name: name,
+          phone: phone,
+          email: email,
+          business_type: 'Trades & Construction',
+          message: 'Service: ' + service + (message ? ' \u2014 ' + message : ''),
+          notify_email: 'bob@bobsplumbing.com'
+        })
+      });
     const data = await res.json();
     if (data.success) {
       result.textContent = '✅ Thanks ' + name + '! We\'ll call you within 1 hour to schedule your free estimate.';
