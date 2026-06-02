@@ -21,16 +21,33 @@ from flask import (
     render_template_string,
 )
 
-# Gmail integration — gracefully handles missing credentials
-try:
-    sys.path.insert(0, "/Users/emiliopegolo/gmail-bot")
-    from gmail import send_email
-    GMAIL_AVAILABLE = True
-except (ImportError, FileNotFoundError, Exception):
-    GMAIL_AVAILABLE = False
-    def send_email(to, subject, body):
-        print(f"[GMAIL UNAVAILABLE] Would send to {to}: {subject}")
-        return {"success": False, "error": "Gmail not configured on this server"}
+# Email integration — SMTP (works everywhere, no local token needed)
+import smtplib
+from email.mime.text import MIMEText
+
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASS = os.environ.get("SMTP_PASS", "")
+
+def send_email(to, subject, body):
+    """Send email via SMTP. Works on Railway with app password."""
+    if not SMTP_USER or not SMTP_PASS:
+        print(f"[EMAIL DISABLED] Set SMTP_USER and SMTP_PASS env vars to enable")
+        return {"success": False, "error": "SMTP not configured"}
+    try:
+        msg = MIMEText(body)
+        msg["To"] = to
+        msg["Subject"] = subject
+        msg["From"] = SMTP_USER
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, [to], msg.as_string())
+        return {"success": True}
+    except Exception as e:
+        print(f"[EMAIL ERROR] {e}")
+        return {"success": False, "error": str(e)}
 
 app = Flask(__name__)
 app.secret_key = os.urandom(32).hex()
