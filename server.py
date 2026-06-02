@@ -21,9 +21,16 @@ from flask import (
     render_template_string,
 )
 
-# Add gmail-bot to path so we can import send_email
-sys.path.insert(0, "/Users/emiliopegolo/gmail-bot")
-from gmail import send_email
+# Gmail integration — gracefully handles missing credentials
+try:
+    sys.path.insert(0, "/Users/emiliopegolo/gmail-bot")
+    from gmail import send_email
+    GMAIL_AVAILABLE = True
+except (ImportError, FileNotFoundError, Exception):
+    GMAIL_AVAILABLE = False
+    def send_email(to, subject, body):
+        print(f"[GMAIL UNAVAILABLE] Would send to {to}: {subject}")
+        return {"success": False, "error": "Gmail not configured on this server"}
 
 app = Flask(__name__)
 app.secret_key = os.urandom(32).hex()
@@ -1590,4 +1597,4 @@ if __name__ == "__main__":
     print("    GET  /dashboard            — Admin dashboard (auth)")
     print("    GET  /checkout/success     — Thank-you page")
     print("=" * 50 + "\n")
-    app.run(host="0.0.0.0", port=5002, debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5002)), debug=False)
