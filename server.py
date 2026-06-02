@@ -210,7 +210,7 @@ def init_db():
     """
     )
 
-    # Invoices table
+    # Invoices table — one-time + subscription support
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS invoices (
@@ -224,10 +224,30 @@ def init_db():
             due_date TEXT,
             invoice_number TEXT UNIQUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            paid_at TIMESTAMP
+            paid_at TIMESTAMP,
+            has_subscription INTEGER DEFAULT 0,
+            sub_amount REAL DEFAULT 0,
+            sub_interval TEXT DEFAULT 'month',
+            sub_description TEXT DEFAULT '',
+            stripe_subscription_id TEXT DEFAULT '',
+            sub_status TEXT DEFAULT 'none'
         )
     """
     )
+    # Safe migration: add subscription columns if missing
+    sub_cols = [
+        ("has_subscription", "INTEGER DEFAULT 0"),
+        ("sub_amount", "REAL DEFAULT 0"),
+        ("sub_interval", "TEXT DEFAULT 'month'"),
+        ("sub_description", "TEXT DEFAULT ''"),
+        ("stripe_subscription_id", "TEXT DEFAULT ''"),
+        ("sub_status", "TEXT DEFAULT 'none'"),
+    ]
+    for col_name, col_def in sub_cols:
+        try:
+            conn.execute(f"ALTER TABLE invoices ADD COLUMN {col_name} {col_def}")
+        except sqlite3.OperationalError:
+            pass
 
     conn.commit()
     conn.close()
@@ -336,14 +356,22 @@ def get_invoice_by_id(invoice_id):
     return dict(row) if row else None
 
 
-def build_invoice_email_body(inv, stripe_url=None):
-    payment_section = f"\nPay now: {stripe_url}\n" if stripe_url else f"\nView invoice: https://automate-pro-production.up.railway.app/invoice/{inv['id']}\n"
+def build_invoice_email_body(inv, stripe_url=None, sub_stripe_url=None):
+    payment_section = f"\nPay setup fee: {stripe_url}\n" if stripe_url else f"\nView invoice: https://automate-pro-production.up.railway.app/invoice/{inv['id']}\n"
+    sub_section = ""
+    if inv.get("has_subscription") and sub_stripe_url:
+        sub_amt = inv.get("sub_amount", 0)
+        sub_int = inv.get("sub_interval", "month")
+        sub_desc = inv.get("sub_description", "") or "Monthly retainer"
+        sub_section = f"\nSubscription: {sub_desc} — ${sub_amt:.2f}/{sub_int}\nSubscribe: {sub_stripe_url}\n"
     return (
         f"Hi {inv['client_name']},\n\n"
-        f"Your invoice #{inv['invoice_number']} for ${inv['amount']:.2f} is ready.\n"
+        f"Your invoice #{inv['invoice_number']} is ready.\n"
+        f"Setup fee: ${inv['amount']:.2f}\n"
         f"Description: {inv.get('description') or 'Automation Services'}\n".rstrip() + "\n"
         f"Due: {inv.get('due_date') or 'Upon receipt'}\n"
         f"{payment_section}"
+        f"{sub_section}"
         "\n"
         "Thanks,\n"
         "Emilio Pegolo\n"
@@ -1084,15 +1112,31 @@ def api_create_invoice():
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid amount"}), 400
 
+    has_sub = data.get("has_subscription", False)
+    sub_amount = 0
+    sub_interval = "month"
+    sub_description = ""
+    if has_sub:
+        try:
+            sub_amount = float(data.get("sub_amount", 0))
+            if sub_amount <= 0:
+                has_sub = False
+            sub_interval = data.get("sub_interval", "month") or "month"
+            sub_description = (data.get("sub_description") or "").strip()
+        except (TypeError, ValueError):
+            has_sub = False
+
     invoice_id = str(uuid.uuid4())[:8]
     invoice_number = generate_invoice_number()
 
     conn = get_db()
     conn.execute(
         """INSERT INTO invoices
-           (id, lead_id, client_name, client_email, amount, description, due_date, invoice_number)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (invoice_id, lead_id, client_name, client_email, amount, description, due_date, invoice_number),
+           (id, lead_id, client_name, client_email, amount, description, due_date, invoice_number,
+            has_subscription, sub_amount, sub_interval, sub_description)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (invoice_id, lead_id, client_name, client_email, amount, description, due_date, invoice_number,
+         1 if has_sub else 0, sub_amount, sub_interval, sub_description),
     )
     conn.commit()
     conn.close()
@@ -1121,7 +1165,9 @@ def api_update_invoice(invoice_id):
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
 
-    allowed_updates = {"status", "paid_at", "description", "due_date", "amount"}
+    allowed_updates = {"status", "paid_at", "description", "due_date", "amount",
+                       "has_subscription", "sub_amount", "sub_interval", "sub_description",
+                       "stripe_subscription_id", "sub_status"}
     updates = {k: v for k, v in data.items() if k in allowed_updates}
 
     if not updates:
@@ -1150,16 +1196,16 @@ def api_send_invoice(invoice_id):
     if not inv:
         return jsonify({"error": "Invoice not found"}), 404
 
-    # Create Stripe payment link for this invoice
+    # Create Stripe payment link for the one-time setup fee
     stripe_url = None
     try:
         amount_cents = int(inv["amount"] * 100)
-        session = stripe.checkout.Session.create(
+        s = stripe.checkout.Session.create(
             payment_method_types=["card"],
             line_items=[{
                 "price_data": {
                     "currency": "usd",
-                    "product_data": {"name": f"Invoice #{inv['invoice_number']} - {inv['description'] or 'Automation Services'}"},
+                    "product_data": {"name": f"Setup - Invoice #{inv['invoice_number']} — {inv['description'] or 'Automation Services'}"},
                     "unit_amount": amount_cents,
                 },
                 "quantity": 1,
@@ -1167,29 +1213,118 @@ def api_send_invoice(invoice_id):
             mode="payment",
             success_url=f"https://automate-pro-production.up.railway.app/checkout/success?invoice={inv['id']}",
             cancel_url=f"https://automate-pro-production.up.railway.app/invoice/{inv['id']}",
-            metadata={"invoice_id": inv["id"]}
+            metadata={"invoice_id": inv["id"], "payment_type": "setup"}
         )
-        stripe_url = session.url
+        stripe_url = s.url
     except Exception as e:
         stripe_url = None
 
+    # Create Stripe subscription link if invoice has subscription
+    sub_stripe_url = None
+    sub_session_id = None
+    if inv.get("has_subscription") and inv.get("sub_amount", 0) > 0:
+        try:
+            sub_amt_cents = int(inv["sub_amount"] * 100)
+            sub_desc = inv.get("sub_description", "") or "Monthly Retainer"
+            sub_int = inv.get("sub_interval", "month")
+            # Create a product + price for the subscription
+            sub_product = stripe.Product.create(name=f"Subscription - Invoice #{inv['invoice_number']} — {sub_desc}")
+            sub_price = stripe.Price.create(
+                product=sub_product.id,
+                unit_amount=sub_amt_cents,
+                currency="usd",
+                recurring={"interval": sub_int},
+            )
+            sub_session = stripe.checkout.Session.create(
+                payment_method_types=["card"],
+                line_items=[{"price": sub_price.id, "quantity": 1}],
+                mode="subscription",
+                success_url=f"https://automate-pro-production.up.railway.app/checkout/success?invoice={inv['id']}",
+                cancel_url=f"https://automate-pro-production.up.railway.app/invoice/{inv['id']}",
+                metadata={"invoice_id": inv["id"], "payment_type": "subscription"}
+            )
+            sub_stripe_url = sub_session.url
+            sub_session_id = sub_session.id
+        except Exception as e:
+            sub_stripe_url = None
+
     subject = f"Invoice #{inv['invoice_number']} from Automate Pro"
-    body = build_invoice_email_body(inv, stripe_url)
+    body = build_invoice_email_body(inv, stripe_url, sub_stripe_url)
     
-    # Also save the stripe URL to the invoice
     conn = get_db()
-    if stripe_url and inv["status"] == "draft":
+    if (stripe_url or sub_stripe_url) and inv["status"] == "draft":
         conn.execute("UPDATE invoices SET status = ? WHERE id = ?", ("sent", invoice_id))
 
-    # Send professional HTML-like email
     result = send_email(inv["client_email"], subject, body)
     conn.commit()
     conn.close()
     
     if result.get("success"):
-        return jsonify({"success": True, "message": f"Invoice sent to {inv['client_email']}", "stripe_url": stripe_url})
-    else:
-        return jsonify({"error": result.get("error", "Failed to send email")}), 500
+        return jsonify({
+            "success": True,
+            "message": f"Invoice sent to {inv['client_email']}",
+            "stripe_url": stripe_url,
+            "sub_stripe_url": sub_stripe_url
+        })
+    return jsonify({"error": "Failed to send email"}), 500
+
+
+# ── Stripe Endpoints ────────────────────────────────────────────────────────
+
+@app.route("/api/invoices/<invoice_id>/cancel-subscription", methods=["POST"])
+@login_required
+def api_cancel_subscription(invoice_id):
+    """Cancel a subscription — emails Emilio so he can take the website down."""
+    inv = get_invoice_by_id(invoice_id)
+    if not inv:
+        return jsonify({"error": "Invoice not found"}), 404
+    if not inv.get("has_subscription"):
+        return jsonify({"error": "This invoice has no subscription"}), 400
+    if inv.get("sub_status") in ("cancelled", "none"):
+        return jsonify({"error": f"Subscription is already {inv.get('sub_status', 'none')}"}), 400
+
+    # Cancel in Stripe if we have a subscription ID
+    stripe_sub_id = inv.get("stripe_subscription_id", "")
+    if stripe_sub_id:
+        try:
+            stripe.Subscription.modify(stripe_sub_id, cancel_at_period_end=True)
+        except Exception as e:
+            print(f"[Cancel Sub] Stripe error cancelling {stripe_sub_id}: {e}")
+            # Still proceed with notification even if Stripe fails
+
+    # Mark subscription as cancelled in DB
+    conn = get_db()
+    conn.execute(
+        "UPDATE invoices SET sub_status = ? WHERE id = ?",
+        ("cancelled", invoice_id),
+    )
+    conn.commit()
+    conn.close()
+
+    # Email Emilio to take the website down
+    SEPARATOR = "=" * 50
+    notify_subject = f"🚫 Subscription Cancelled — {inv['client_name']} ({inv['client_email']})"
+    notify_body = (
+        "Subscription Cancelled!\n"
+        f"{SEPARATOR}\n"
+        f"Client: {inv['client_name']}\n"
+        f"Email: {inv['client_email']}\n"
+        f"Invoice: #{inv['invoice_number']}\n"
+        f"Setup fee paid: ${inv['amount']:.2f}\n"
+        f"Subscription: ${inv.get('sub_amount', 0):.2f}/{inv.get('sub_interval', 'month')}\n"
+        f"Subscription desc: {inv.get('sub_description', '') or 'N/A'}\n"
+        f"Stripe sub ID: {stripe_sub_id or 'N/A'}\n"
+        f"Cancelled at: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        "\n"
+        "➡ ACTION REQUIRED: Take down the client's website/automation!\n"
+        f"{SEPARATOR}\n"
+    )
+    send_email(NOTIFY_EMAIL, notify_subject, notify_body)
+
+    return jsonify({
+        "success": True,
+        "message": f"Subscription cancelled for {inv['client_name']}. You've been notified."
+    })
 
 
 @app.route("/invoice/<invoice_id>")
@@ -1201,8 +1336,6 @@ def public_invoice_view(invoice_id):
         return render_template_string(INVOICE_NOT_FOUND_HTML)
     return render_template_string(INVOICE_PAGE_HTML, inv=inv)
 
-
-# ── Stripe Endpoints ────────────────────────────────────────────────────────
 
 @app.route("/api/config", methods=["GET"])
 def api_config():
@@ -1367,6 +1500,14 @@ def api_stripe_webhook():
         handle_checkout_completed(session_data)
     elif event_type == "checkout.session.expired":
         print(f"  [Webhook] Checkout session expired: {event.get('id')}")
+    elif event_type == "customer.subscription.deleted":
+        sub_data = event.get("data", {}).get("object", {})
+        handle_subscription_deleted(sub_data)
+    elif event_type == "invoice.payment_succeeded":
+        inv_data = event.get("data", {}).get("object", {})
+        # Check if this is a subscription invoice (recurring payment)
+        if inv_data.get("subscription"):
+            handle_subscription_payment(inv_data)
     else:
         print(f"  [Webhook] Unhandled event type: {event_type}")
 
@@ -1386,21 +1527,44 @@ def handle_checkout_completed(session_data):
     amount_total = session_data.get("amount_total", 0) / 100.0
     currency = session_data.get("currency", "usd") or "usd"
 
-    # Handle invoice payments
+    # Handle invoice payments (both setup fees and subscription signups)
     if invoice_id:
+        payment_type = metadata.get("payment_type", "setup")
         conn = get_db()
-        conn.execute("UPDATE invoices SET status = 'paid', paid_at = datetime('now') WHERE id = ?", (invoice_id,))
+        
+        if payment_type == "setup":
+            conn.execute("UPDATE invoices SET status = 'paid', paid_at = datetime('now') WHERE id = ?", (invoice_id,))
+        elif payment_type == "subscription":
+            # Save the subscription ID from the checkout session
+            sub_id = session_data.get("subscription", "")
+            if sub_id and isinstance(sub_id, str):
+                conn.execute(
+                    "UPDATE invoices SET stripe_subscription_id = ?, sub_status = 'active' WHERE id = ?",
+                    (sub_id, invoice_id),
+                )
+            elif isinstance(sub_id, dict):
+                sid = sub_id.get("id", "")
+                if sid:
+                    conn.execute(
+                        "UPDATE invoices SET stripe_subscription_id = ?, sub_status = 'active' WHERE id = ?",
+                        (sid, invoice_id),
+                    )
+        
         conn.commit()
-        # Send receipt email
         inv = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
         conn.close()
         if inv:
-            receipt_subject = f"Receipt — Invoice #{inv[8]} Paid"
-            receipt_body = f"Hi {inv[2]},\n\nYour invoice #{inv[8]} for ${inv[4]:.2f} has been paid.\n\nAmount paid: ${inv[4]:.2f}\nDate: $(datetime.now().strftime('%Y-%m-%d %H:%M'))\n\nThank you for your business!\n\nEmilio\nAutomate Pro"
-            send_email(inv[3], receipt_subject, receipt_body)
-            # Notify Emilio
-            notify = f"✅ Invoice #{inv[8]} paid — ${inv[4]:.2f} from {inv[2]}"
-            send_email("emilio.pegolo1@gmail.com", "Payment Received: Invoice #" + inv[8], notify)
+            if payment_type == "setup":
+                receipt_subject = f"Receipt — Invoice #{inv[8]} Paid"
+                receipt_body = f"Hi {inv[2]},\n\nYour invoice #{inv[8]} for ${inv[4]:.2f} has been paid.\n\nThank you for your business!\n\nEmilio\nAutomate Pro"
+                send_email(inv[3], receipt_subject, receipt_body)
+                notify = f"✅ Invoice #{inv[8]} setup fee paid — ${inv[4]:.2f} from {inv[2]}"
+                send_email("emilio.pegolo1@gmail.com", "Payment Received (Setup): Invoice #" + inv[8], notify)
+            elif payment_type == "subscription":
+                sub_amt = inv[12] if len(inv) > 12 else 0  # sub_amount column
+                sub_int = inv[13] if len(inv) > 13 else "month"  # sub_interval
+                notify = f"✅ Subscription started — ${sub_amt:.2f}/{sub_int} from {inv[2]} ({inv[3]})"
+                send_email("emilio.pegolo1@gmail.com", "🔄 Subscription Started: " + inv[10], notify)
         return
 
     plan = PLANS.get(plan_key, {})
@@ -1456,6 +1620,66 @@ def handle_checkout_completed(session_data):
         print(f"  [Payment] Notification sent to {NOTIFY_EMAIL}")
     except Exception as e:
         print(f"  [Payment] Failed to send notification: {e}")
+
+
+def handle_subscription_deleted(sub_data):
+    """Handle subscription deleted/cancelled from Stripe webhook."""
+    sub_id = sub_data.get("id", "")
+    if not sub_id:
+        return
+    # Find the invoice with this subscription ID
+    conn = get_db()
+    try:
+        # Check if column exists first
+        inv = conn.execute(
+            "SELECT * FROM invoices WHERE stripe_subscription_id = ? AND has_subscription = 1",
+            (sub_id,),
+        ).fetchone()
+        if inv:
+            inv_dict = dict(inv)
+            conn.execute(
+                "UPDATE invoices SET sub_status = 'cancelled' WHERE stripe_subscription_id = ?",
+                (sub_id,),
+            )
+            conn.commit()
+            # Notify Emilio to take the website down
+            notify = (
+                f"🚫 Subscription Cancelled via Stripe!\n"
+                f"\n"
+                f"Client: {inv_dict.get('client_name', 'Unknown')}\n"
+                f"Email: {inv_dict.get('client_email', 'Unknown')}\n"
+                f"Invoice: #{inv_dict.get('invoice_number', 'N/A')}\n"
+                f"Stripe Sub ID: {sub_id}\n"
+                f"\n"
+                f"➡ ACTION REQUIRED: Take down their website/automation!\n"
+            )
+            send_email(NOTIFY_EMAIL, "🚫 Subscription Cancelled (Stripe Webhook)", notify)
+    except Exception as e:
+        print(f"[Webhook] Error handling subscription deletion: {e}")
+    finally:
+        conn.close()
+
+
+def handle_subscription_payment(inv_data):
+    """Handle recurring subscription payment success."""
+    sub_id = inv_data.get("subscription", "")
+    amount_paid = inv_data.get("amount_paid", 0) / 100.0
+    customer_email = inv_data.get("customer_email", "") or inv_data.get("customer_details", {}).get("email", "")
+    if not sub_id:
+        return
+    conn = get_db()
+    try:
+        inv = conn.execute(
+            "SELECT * FROM invoices WHERE stripe_subscription_id = ? AND has_subscription = 1",
+            (sub_id,),
+        ).fetchone()
+        if inv:
+            notify = f"🔄 Recurring payment received: ${amount_paid:.2f} from {inv[2]} ({inv[3]})"
+            send_email(NOTIFY_EMAIL, f"💰 Subscription Payment — ${amount_paid:.2f}", notify)
+    except Exception as e:
+        print(f"[Webhook] Error handling subscription payment: {e}")
+    finally:
+        conn.close()
 
 
 @app.route("/checkout/success")
@@ -1967,20 +2191,44 @@ INVOICE_PAGE_HTML = """<!DOCTYPE html>
         <tbody>
           <tr>
             <td>
-              {{inv['description'] or 'Professional Automation Service'}}
+              <div style="font-weight:600;">Setup Fee — {{inv['description'] or 'Professional Automation Service'}}</div>
               <div class="desc">{{inv['invoice_number']}}</div>
             </td>
             <td>${{'{:,.2f}'.format(inv['amount'])}}</td>
           </tr>
+          {% if inv.get('has_subscription') and inv.get('sub_amount', 0) > 0 %}
+          <tr>
+            <td>
+              <div style="font-weight:600;">Subscription — {{inv.get('sub_description') or 'Monthly Retainer'}}</div>
+              <div class="desc">Recurring {{inv.get('sub_interval') or 'month'}}ly</div>
+            </td>
+            <td>${{'{:,.2f}'.format(inv['sub_amount'])}}/<span style="font-size:12px;color:var(--text-muted);">{{inv.get('sub_interval') or 'mo'}}</span></td>
+          </tr>
+          {% endif %}
         </tbody>
       </table>
     </div>
 
     <!-- Total -->
     <div class="invoice-total">
-      <div class="total-label">Total Due</div>
+      <div class="total-label">Setup Fee</div>
       <div class="total-amount">${{'{:,.2f}'.format(inv['amount'])}}</div>
-      <div style="margin-top:8px;">
+      {% if inv.get('has_subscription') and inv.get('sub_amount', 0) > 0 %}
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-size:14px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Subscription</div>
+            <div style="font-size:13px;color:var(--blue);">{{inv.get('sub_description') or 'Monthly Retainer'}} — ${{'{:,.2f}'.format(inv['sub_amount'])}}/{{inv.get('sub_interval') or 'month'}}</div>
+          </div>
+          <div style="font-size:20px;font-weight:700;color:#fff;">${{'{:,.2f}'.format(inv['sub_amount'])}}<span style="font-size:13px;font-weight:400;color:var(--text-muted);">/{{inv.get('sub_interval') or 'mo'}}</span></div>
+        </div>
+        <div style="margin-top:8px;">
+          <span class="status-badge" style="{% if inv.get('sub_status') == 'active' %}background:rgba(0,212,170,0.15);color:var(--green);{% elif inv.get('sub_status') == 'cancelled' %}background:rgba(255,77,106,0.15);color:var(--red);{% else %}background:rgba(77,171,247,0.15);color:var(--blue);{% endif %}">{{inv.get('sub_status') or 'pending'}}</span>
+        </div>
+      </div>
+      {% endif %}
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+        <div style="font-size:14px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Status</div>
         <span class="status-badge {{inv['status']}}">{{inv['status']}}</span>
       </div>
     </div>
@@ -2665,14 +2913,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <tr>
             <th>Invoice #</th>
             <th>Client</th>
-            <th>Amount</th>
+            <th>Setup</th>
+            <th>Subscription</th>
             <th>Status</th>
             <th>Date</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody id="invoices-body">
-          <tr><td colspan="6" class="loading">Loading invoices</td></tr>
+          <tr><td colspan="7" class="loading">Loading invoices</td></tr>
         </tbody>
       </table>
     </div>
@@ -2686,6 +2935,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <button class="close-btn" onclick="closeCreateInvoiceModal()">&times;</button>
     <h3>Create Invoice</h3>
     <div class="modal-sub">Generate a new invoice for a client</div>
+
+    <!-- One-Time Setup Fee -->
+    <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">💼 One-Time Setup Fee</div>
     <div class="form-group">
       <label>Client Name</label>
       <input type="text" id="inv-client-name" placeholder="Full name">
@@ -2695,17 +2947,46 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <input type="email" id="inv-client-email" placeholder="client@example.com">
     </div>
     <div class="form-group">
-      <label>Amount ($)</label>
+      <label>Setup Amount ($)</label>
       <input type="number" id="inv-amount" placeholder="0.00" step="0.01" min="0">
     </div>
     <div class="form-group">
       <label>Description</label>
-      <input type="text" id="inv-description" placeholder="Service description (e.g. Automation Setup)">
+      <input type="text" id="inv-description" placeholder="e.g. Automation Setup">
     </div>
     <div class="form-group">
       <label>Due Date (optional)</label>
       <input type="date" id="inv-due-date">
     </div>
+
+    <!-- Subscription Toggle -->
+    <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;">🔄 Subscription (Optional)</div>
+    <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+      <label style="margin-bottom:0;">Add recurring subscription?</label>
+      <label class="toggle-switch">
+        <input type="checkbox" id="inv-has-sub" onchange="toggleSubFields()">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div id="inv-sub-fields" style="display:none;">
+      <div class="form-group">
+        <label>Subscription Amount ($)</label>
+        <input type="number" id="inv-sub-amount" placeholder="0.00" step="0.01" min="0">
+      </div>
+      <div class="form-group">
+        <label>Billing Interval</label>
+        <select id="inv-sub-interval">
+          <option value="month">Monthly</option>
+          <option value="year">Yearly</option>
+          <option value="week">Weekly</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Description (e.g. "Monthly Retainer")</label>
+        <input type="text" id="inv-sub-desc" placeholder="Monthly Retainer">
+      </div>
+    </div>
+
     <div class="form-group" id="inv-lead-group" style="display:none;">
       <label>Lead ID</label>
       <input type="text" id="inv-lead-id" readonly style="opacity:0.6;font-size:12px;">
@@ -2718,6 +2999,44 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="email-result" id="create-invoice-result"></div>
   </div>
 </div>
+
+<style>
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  transition: 0.2s;
+}
+.toggle-slider:before {
+  content: "";
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: 0.2s;
+}
+.toggle-switch input:checked + .toggle-slider {
+  background: rgba(0,212,170,0.2);
+  border-color: var(--green);
+}
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(20px);
+  background: var(--green);
+}
+</style>
 
 <!-- Confirm Invoice Modal -->
 <div class="modal-overlay" id="confirm-invoice-modal">
@@ -3119,18 +3438,26 @@ async function sendEmailToLead() {
 
 // ── Invoice Functions ──
 
+function toggleSubFields() {
+  const checked = $('inv-has-sub').checked;
+  $('inv-sub-fields').style.display = checked ? 'block' : 'none';
+}
+
 async function loadInvoices() {
   const invs = await fetchJSON('/api/invoices');
   if (!invs) return;
   const tbody = $('invoices-body');
   if (invs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;padding:40px;">No invoices yet. Create your first one!</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;padding:40px;">No invoices yet. Create your first one!</td></tr>';
     return;
   }
   tbody.innerHTML = invs.map(inv => {
     const statusClass = inv.status || 'draft';
     const dateStr = inv.created_at ? inv.created_at.slice(0, 10) : '—';
     const leadAttr = inv.lead_id ? `data-lead="${inv.lead_id}"` : '';
+    const hasSub = inv.has_subscription;
+    const subInfo = hasSub ? `$${Number(inv.sub_amount||0).toLocaleString('en-AU',{minimumFractionDigits:2})}/${inv.sub_interval||'month'}` : '—';
+    const subBadge = hasSub ? (inv.sub_status === 'active' ? '<span style="color:var(--green);font-size:11px;">🟢 active</span>' : inv.sub_status === 'cancelled' ? '<span style="color:var(--red);font-size:11px;">🔴 cancelled</span>' : '<span style="color:var(--blue);font-size:11px;">⏳ pending</span>') : '';
     return `<tr ${leadAttr}>
       <td style="font-weight:600;color:#fff;">${escapeHtml(inv.invoice_number)}</td>
       <td>
@@ -3138,6 +3465,10 @@ async function loadInvoices() {
         <div style="font-size:12px;color:#888;">${escapeHtml(inv.client_email)}</div>
       </td>
       <td style="font-weight:600;color:#fff;">$${Number(inv.amount).toLocaleString('en-AU', {minimumFractionDigits:2})}</td>
+      <td>
+        <div style="font-size:13px;">${subInfo}</div>
+        <div>${subBadge}</div>
+      </td>
       <td><span class="inv-badge ${statusClass}">${statusClass}</span></td>
       <td style="color:#888;font-size:13px;">${dateStr}</td>
       <td>
@@ -3145,6 +3476,7 @@ async function loadInvoices() {
           <button class="view-btn" onclick="window.open('/invoice/${inv.id}','_blank')">👁️ View</button>
           ${statusClass !== 'paid' && statusClass !== 'cancelled' ? `<button class="send" onclick="sendInvoice('${inv.id}')">📧 Send</button>` : ''}
           ${statusClass === 'sent' ? `<button class="pay" onclick="markInvoicePaid('${inv.id}')">✅ Paid</button>` : ''}
+          ${hasSub && inv.sub_status === 'active' ? `<button class="cancel-sub" onclick="cancelSubscription('${inv.id}')" style="color:var(--red);border-color:var(--red);">🚫 Cancel Sub</button>` : ''}
         </div>
       </td>
     </tr>`;
@@ -3175,6 +3507,17 @@ async function markInvoicePaid(id) {
   }
 }
 
+async function cancelSubscription(id) {
+  if (!confirm('Are you sure you want to cancel this subscription?\n\nThis will:\n• Cancel the recurring billing in Stripe\n• Email Emilio to take down the client\'s website\n• Mark the subscription as cancelled')) return;
+  const res = await fetchJSON('/api/invoices/' + id + '/cancel-subscription', { method: 'POST' });
+  if (res && res.success) {
+    toast('✅ ' + res.message, 'success');
+    loadInvoices();
+  } else {
+    toast('❌ ' + (res ? res.error : 'Failed to cancel subscription'), 'error');
+  }
+}
+
 function openCreateInvoiceModal() {
   $('inv-client-name').value = '';
   $('inv-client-email').value = '';
@@ -3183,6 +3526,11 @@ function openCreateInvoiceModal() {
   $('inv-due-date').value = '';
   $('inv-lead-id').value = '';
   $('inv-lead-group').style.display = 'none';
+  $('inv-has-sub').checked = false;
+  $('inv-sub-fields').style.display = 'none';
+  $('inv-sub-amount').value = '';
+  $('inv-sub-interval').value = 'month';
+  $('inv-sub-desc').value = '';
   $('create-invoice-result').className = 'email-result';
   $('create-invoice-result').textContent = '';
   $('create-invoice-modal').classList.add('open');
@@ -3194,7 +3542,6 @@ function closeCreateInvoiceModal() {
 
 function createInvoiceForLead() {
   if (!currentLeadId) return;
-  // Fetch lead details to pre-fill
   fetchJSON('/api/lead/' + currentLeadId).then(lead => {
     if (!lead) return;
     $('inv-client-name').value = lead.name || '';
@@ -3204,6 +3551,11 @@ function createInvoiceForLead() {
     $('inv-due-date').value = lead.follow_up_date || '';
     $('inv-lead-id').value = currentLeadId;
     $('inv-lead-group').style.display = 'block';
+    $('inv-has-sub').checked = false;
+    $('inv-sub-fields').style.display = 'none';
+    $('inv-sub-amount').value = '';
+    $('inv-sub-interval').value = 'month';
+    $('inv-sub-desc').value = '';
     $('create-invoice-result').className = 'email-result';
     $('create-invoice-result').textContent = '';
     $('create-invoice-modal').classList.add('open');
@@ -3218,6 +3570,7 @@ async function createInvoice() {
   const desc = $('inv-description').value.trim();
   const due = $('inv-due-date').value;
   const leadId = $('inv-lead-id').value;
+  const hasSub = $('inv-has-sub').checked;
   const resultDiv = $('create-invoice-result');
 
   if (!name || !email) {
@@ -3226,7 +3579,7 @@ async function createInvoice() {
     return;
   }
   if (!amount || amount <= 0) {
-    resultDiv.textContent = 'Please enter a valid amount.';
+    resultDiv.textContent = 'Please enter a valid setup amount.';
     resultDiv.className = 'email-result error';
     return;
   }
@@ -3240,7 +3593,11 @@ async function createInvoice() {
     client_email: email,
     amount: amount,
     description: desc,
-    due_date: due
+    due_date: due,
+    has_subscription: hasSub,
+    sub_amount: hasSub ? parseFloat($('inv-sub-amount').value) || 0 : 0,
+    sub_interval: hasSub ? ($('inv-sub-interval').value || 'month') : 'month',
+    sub_description: hasSub ? ($('inv-sub-desc').value.trim() || '') : ''
   };
   if (leadId) body.lead_id = leadId;
 
@@ -3268,16 +3625,25 @@ async function createAndSendInvoice() {
   const amount = parseFloat($('inv-amount').value);
   const desc = $('inv-description').value.trim();
   const due = $('inv-due-date').value;
+  const hasSub = $('inv-has-sub').checked;
   const resultDiv = $('create-invoice-result');
   if (!name || !email) { resultDiv.textContent = 'Please fill in name and email'; resultDiv.className = 'email-result error'; return; }
-  if (!amount || amount <= 0) { resultDiv.textContent = 'Invalid amount'; resultDiv.className = 'email-result error'; return; }
+  if (!amount || amount <= 0) { resultDiv.textContent = 'Invalid setup amount'; resultDiv.className = 'email-result error'; return; }
   resultDiv.textContent = 'Creating and sending...'; resultDiv.className = 'email-result'; resultDiv.style.display = 'block';
-  const res = await fetchJSON('/api/invoices', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({client_name:name, client_email:email, amount:amount, description:desc, due_date:due}) });
+  const body = {
+    client_name: name, client_email: email, amount: amount,
+    description: desc, due_date: due,
+    has_subscription: hasSub,
+    sub_amount: hasSub ? parseFloat($('inv-sub-amount').value) || 0 : 0,
+    sub_interval: hasSub ? ($('inv-sub-interval').value || 'month') : 'month',
+    sub_description: hasSub ? ($('inv-sub-desc').value.trim() || '') : ''
+  };
+  const res = await fetchJSON('/api/invoices', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
   if (res && !res.error) {
     resultDiv.textContent = '✅ Invoice created! Now sending...';
     const sendResult = await fetchJSON('/api/invoices/' + res.id + '/send', { method:'POST' });
     if (sendResult && sendResult.success) {
-      resultDiv.textContent = '✅ Invoice sent to ' + email + ' with Stripe payment link!';
+      resultDiv.textContent = '✅ Invoice sent! ' + (hasSub ? 'Setup + subscription links sent!' : 'Stripe payment link sent!');
       resultDiv.className = 'email-result success';
       toast('Invoice created and sent!', 'success');
       closeCreateInvoiceModal();
