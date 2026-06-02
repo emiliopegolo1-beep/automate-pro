@@ -1165,7 +1165,7 @@ def api_send_invoice(invoice_id):
                 "quantity": 1,
             }],
             mode="payment",
-            success_url=f"https://automate-pro-production.up.railway.app/invoice/{inv['id']}?paid=true",
+            success_url=f"https://automate-pro-production.up.railway.app/checkout/success?invoice={inv['id']}",
             cancel_url=f"https://automate-pro-production.up.railway.app/invoice/{inv['id']}",
             metadata={"invoice_id": inv["id"]}
         )
