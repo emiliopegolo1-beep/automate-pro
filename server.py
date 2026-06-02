@@ -340,7 +340,7 @@ def build_invoice_email_body(inv):
     return (
         f"Hi {inv['client_name']},\n\n"
         f"Your invoice #{inv['invoice_number']} for ${inv['amount']:.2f} is ready.\n\n"
-        f"View invoice: https://automatepro.ai/invoice/{inv['id']}\n"
+        f"View invoice: https://automate-pro-production.up.railway.app/invoice/{inv['id']}\n"
         f"Due: {inv.get('due_date') or 'Upon receipt'}\n\n"
         "Thanks,\n"
         "Emilio\n"
