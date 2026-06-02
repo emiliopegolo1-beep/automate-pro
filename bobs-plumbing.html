@@ -1,0 +1,894 @@
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bob's Plumbing Services — Sydney's Trusted Plumber</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+--bg: #0a0a0f;
+--surface: #12121a;
+--surface-2: #1a1a26;
+--border: #2a2a3a;
+--text: #e0e0e0;
+--text-muted: #888;
+--accent: #ff8c42;
+--accent-hover: #e07a30;
+--accent-dim: rgba(255,140,66,0.1);
+--green: #00d4aa;
+--blue: #4dabf7;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+background: var(--bg);
+color: var(--text);
+line-height: 1.6;
+-webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Navigation ── */
+  nav {
+position: fixed;
+top: 0;
+left: 0;
+right: 0;
+z-index: 100;
+background: rgba(10,10,15,0.95);
+backdrop-filter: blur(12px);
+-webkit-backdrop-filter: blur(12px);
+border-bottom: 1px solid var(--border);
+padding: 14px 24px;
+display: flex;
+align-items: center;
+justify-content: space-between;
+  }
+  nav .brand {
+display: flex;
+align-items: center;
+gap: 10px;
+  }
+  nav .brand-icon {
+width: 36px;
+height: 36px;
+background: var(--accent);
+border-radius: 8px;
+display: flex;
+align-items: center;
+justify-content: center;
+font-size: 18px;
+color: #fff;
+  }
+  nav .brand-text {
+font-size: 18px;
+font-weight: 700;
+color: #fff;
+  }
+  nav .brand-text span { color: var(--accent); }
+  nav .nav-links {
+display: flex;
+gap: 24px;
+list-style: none;
+  }
+  nav .nav-links a {
+color: var(--text-muted);
+text-decoration: none;
+font-size: 14px;
+font-weight: 500;
+transition: color 0.2s;
+  }
+  nav .nav-links a:hover { color: var(--accent); }
+  nav .nav-cta {
+display: inline-block;
+padding: 10px 22px;
+background: var(--accent);
+color: #0a0a0f;
+font-weight: 600;
+font-size: 14px;
+border-radius: 8px;
+text-decoration: none;
+transition: background 0.2s;
+  }
+  nav .nav-cta:hover { background: var(--accent-hover); }
+  .mobile-toggle {
+display: none;
+background: none;
+border: none;
+color: var(--text);
+font-size: 24px;
+cursor: pointer;
+padding: 4px;
+  }
+
+  /* ── Hero ── */
+  .hero {
+min-height: 100vh;
+display: flex;
+align-items: center;
+justify-content: center;
+text-align: center;
+padding: 120px 24px 80px;
+position: relative;
+overflow: hidden;
+  }
+  .hero::before {
+content: '';
+position: absolute;
+inset: 0;
+background: radial-gradient(ellipse at 50% 0%, rgba(255,140,66,0.08) 0%, transparent 60%),
+            radial-gradient(ellipse at 80% 20%, rgba(0,212,170,0.04) 0%, transparent 50%);
+pointer-events: none;
+  }
+  .hero-content { position: relative; z-index: 1; max-width: 800px; }
+  .hero-badge {
+display: inline-block;
+padding: 6px 16px;
+border-radius: 20px;
+background: var(--accent-dim);
+border: 1px solid rgba(255,140,66,0.2);
+color: var(--accent);
+font-size: 13px;
+font-weight: 600;
+margin-bottom: 20px;
+  }
+  .hero h1 {
+font-size: clamp(36px, 6vw, 64px);
+font-weight: 800;
+color: #fff;
+line-height: 1.15;
+margin-bottom: 20px;
+  }
+  .hero h1 span { color: var(--accent); }
+  .hero p {
+font-size: 18px;
+color: var(--text-muted);
+max-width: 600px;
+margin: 0 auto 36px;
+line-height: 1.7;
+  }
+  .hero .hero-cta {
+display: inline-flex;
+align-items: center;
+gap: 10px;
+padding: 16px 36px;
+background: var(--accent);
+color: #0a0a0f;
+font-size: 16px;
+font-weight: 700;
+border: none;
+border-radius: 12px;
+cursor: pointer;
+text-decoration: none;
+transition: all 0.2s;
+  }
+  .hero .hero-cta:hover {
+background: var(--accent-hover);
+transform: translateY(-2px);
+box-shadow: 0 8px 24px rgba(255,140,66,0.3);
+  }
+  .hero-stats {
+display: flex;
+justify-content: center;
+gap: 48px;
+margin-top: 48px;
+  }
+  .hero-stats .stat { text-align: center; }
+  .hero-stats .stat .num {
+font-size: 28px;
+font-weight: 800;
+color: #fff;
+  }
+  .hero-stats .stat .label {
+font-size: 13px;
+color: var(--text-muted);
+margin-top: 4px;
+  }
+
+  /* ── Section styles ── */
+  section {
+padding: 80px 24px;
+max-width: 1200px;
+margin: 0 auto;
+  }
+  .section-header {
+text-align: center;
+margin-bottom: 48px;
+  }
+  .section-header h2 {
+font-size: clamp(28px, 4vw, 40px);
+font-weight: 700;
+color: #fff;
+margin-bottom: 12px;
+  }
+  .section-header p {
+font-size: 16px;
+color: var(--text-muted);
+max-width: 600px;
+margin: 0 auto;
+  }
+  .section-header .tag {
+display: inline-block;
+font-size: 12px;
+font-weight: 600;
+color: var(--accent);
+text-transform: uppercase;
+letter-spacing: 0.08em;
+margin-bottom: 8px;
+  }
+
+  /* ── Services ── */
+  .services-grid {
+display: grid;
+grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+gap: 20px;
+  }
+  .service-card {
+background: var(--surface);
+border: 1px solid var(--border);
+border-radius: 14px;
+padding: 32px 28px;
+transition: all 0.25s;
+position: relative;
+overflow: hidden;
+  }
+  .service-card::before {
+content: '';
+position: absolute;
+top: 0;
+left: 0;
+right: 0;
+height: 3px;
+background: var(--accent);
+opacity: 0;
+transition: opacity 0.25s;
+  }
+  .service-card:hover {
+border-color: rgba(255,140,66,0.3);
+transform: translateY(-3px);
+  }
+  .service-card:hover::before { opacity: 1; }
+  .service-card .icon {
+font-size: 32px;
+margin-bottom: 16px;
+  }
+  .service-card h3 {
+font-size: 18px;
+font-weight: 600;
+color: #fff;
+margin-bottom: 8px;
+  }
+  .service-card p {
+font-size: 14px;
+color: var(--text-muted);
+line-height: 1.6;
+  }
+  .service-card .tag-247 {
+display: inline-block;
+margin-top: 12px;
+padding: 4px 12px;
+border-radius: 6px;
+background: rgba(0,212,170,0.12);
+color: var(--green);
+font-size: 12px;
+font-weight: 600;
+  }
+
+  /* ── Why Choose Us ── */
+  .why-grid {
+display: grid;
+grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+gap: 24px;
+  }
+  .why-item {
+text-align: center;
+padding: 28px 20px;
+  }
+  .why-item .icon {
+font-size: 40px;
+margin-bottom: 12px;
+  }
+  .why-item h4 {
+font-size: 16px;
+font-weight: 600;
+color: #fff;
+margin-bottom: 6px;
+  }
+  .why-item p {
+font-size: 14px;
+color: var(--text-muted);
+  }
+
+  /* ── Trust / Google Section ── */
+  .trust-section {
+background: var(--surface);
+border: 1px solid var(--border);
+border-radius: 16px;
+padding: 40px 32px;
+text-align: center;
+  }
+  .trust-stars {
+font-size: 32px;
+margin-bottom: 16px;
+letter-spacing: 4px;
+  }
+  .trust-title {
+font-size: 22px;
+font-weight: 700;
+color: #fff;
+margin-bottom: 8px;
+  }
+  .trust-text {
+font-size: 15px;
+color: var(--text-muted);
+max-width: 500px;
+margin: 0 auto 20px;
+  }
+  .trust-badges {
+display: flex;
+justify-content: center;
+gap: 12px;
+flex-wrap: wrap;
+  }
+  .trust-badge {
+display: inline-flex;
+align-items: center;
+gap: 6px;
+padding: 8px 16px;
+border-radius: 8px;
+background: var(--surface-2);
+border: 1px solid var(--border);
+font-size: 13px;
+font-weight: 500;
+color: var(--text-muted);
+  }
+  .trust-badge.highlight { color: var(--accent); }
+
+  /* ── Form Section ── */
+  .form-section {
+background: var(--surface);
+border: 1px solid var(--border);
+border-radius: 16px;
+padding: 48px 40px;
+max-width: 640px;
+margin: 0 auto;
+  }
+  .form-section h3 {
+font-size: 24px;
+font-weight: 700;
+color: #fff;
+margin-bottom: 8px;
+text-align: center;
+  }
+  .form-section .form-sub {
+text-align: center;
+font-size: 14px;
+color: var(--text-muted);
+margin-bottom: 28px;
+  }
+  .form-group { margin-bottom: 18px; }
+  .form-group label {
+display: block;
+font-size: 13px;
+font-weight: 600;
+color: var(--text-muted);
+margin-bottom: 6px;
+  }
+  .form-group input,
+  .form-group select,
+  .form-group textarea {
+width: 100%;
+padding: 12px 14px;
+border-radius: 10px;
+border: 1px solid var(--border);
+background: var(--surface-2);
+color: #fff;
+font-size: 15px;
+font-family: inherit;
+outline: none;
+transition: border-color 0.2s;
+  }
+  .form-group input:focus,
+  .form-group select:focus,
+  .form-group textarea:focus {
+border-color: var(--accent);
+  }
+  .form-group input::placeholder,
+  .form-group textarea::placeholder { color: #555; }
+  .form-group select option { background: var(--surface-2); }
+  .form-group textarea { min-height: 100px; resize: vertical; }
+  .form-group .required::after {
+content: ' *';
+color: #ff4d6a;
+  }
+  .form-group .hint {
+font-size: 12px;
+color: #555;
+margin-top: 4px;
+  }
+  .form-submit {
+width: 100%;
+padding: 14px;
+border: none;
+border-radius: 10px;
+background: var(--accent);
+color: #0a0a0f;
+font-size: 16px;
+font-weight: 700;
+cursor: pointer;
+transition: all 0.2s;
+  }
+  .form-submit:hover {
+background: var(--accent-hover);
+transform: translateY(-1px);
+  }
+  .form-submit:disabled {
+opacity: 0.5;
+cursor: not-allowed;
+transform: none;
+  }
+  .form-result {
+display: none;
+padding: 14px 18px;
+border-radius: 10px;
+font-size: 14px;
+font-weight: 500;
+margin-top: 16px;
+text-align: center;
+  }
+  .form-result.success {
+display: block;
+background: rgba(0,212,170,0.12);
+border: 1px solid rgba(0,212,170,0.3);
+color: var(--green);
+  }
+  .form-result.error {
+display: block;
+background: rgba(255,77,106,0.12);
+border: 1px solid rgba(255,77,106,0.3);
+color: #ff4d6a;
+  }
+
+  /* ── Contact Section ── */
+  .contact-section {
+background: var(--surface);
+border: 1px solid var(--border);
+border-radius: 16px;
+padding: 40px 32px;
+display: grid;
+grid-template-columns: 1fr 1fr;
+gap: 32px;
+  }
+  .contact-info h3 {
+font-size: 20px;
+font-weight: 700;
+color: #fff;
+margin-bottom: 20px;
+  }
+  .contact-info .contact-item {
+display: flex;
+align-items: center;
+gap: 12px;
+margin-bottom: 16px;
+  }
+  .contact-info .contact-item .ci-icon {
+width: 40px;
+height: 40px;
+min-width: 40px;
+background: var(--accent-dim);
+border-radius: 10px;
+display: flex;
+align-items: center;
+justify-content: center;
+font-size: 18px;
+color: var(--accent);
+  }
+  .contact-info .contact-item .ci-label {
+font-size: 12px;
+color: var(--text-muted);
+margin-bottom: 2px;
+  }
+  .contact-info .contact-item .ci-value {
+font-size: 15px;
+font-weight: 500;
+color: #fff;
+  }
+  .contact-info .contact-item .ci-value a {
+color: var(--accent);
+text-decoration: none;
+  }
+  .contact-info .contact-item .ci-value a:hover { text-decoration: underline; }
+  .contact-map {
+background: var(--surface-2);
+border-radius: 12px;
+height: 240px;
+display: flex;
+align-items: center;
+justify-content: center;
+border: 1px solid var(--border);
+font-size: 14px;
+color: var(--text-muted);
+flex-direction: column;
+gap: 8px;
+  }
+  .contact-map .map-icon { font-size: 36px; }
+  .contact-map .map-label { font-size: 13px; color: var(--text-muted); }
+
+  /* ── Footer ── */
+  footer {
+text-align: center;
+padding: 40px 24px;
+border-top: 1px solid var(--border);
+margin-top: 40px;
+  }
+  footer p {
+font-size: 13px;
+color: var(--text-muted);
+line-height: 1.8;
+  }
+  footer .footer-brand {
+font-weight: 700;
+color: var(--accent);
+font-size: 16px;
+margin-bottom: 6px;
+  }
+  footer .footer-powered {
+font-size: 12px;
+color: #555;
+margin-top: 12px;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+nav .nav-links { display: none; }
+nav .nav-cta { display: none; }
+.mobile-toggle { display: block; }
+nav.mobile-open .nav-links {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: rgba(10,10,15,0.98);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 20px 24px;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+}
+nav.mobile-open .nav-cta {
+  display: inline-block;
+  margin-top: 8px;
+  text-align: center;
+}
+
+.hero { padding: 100px 20px 60px; }
+.hero-stats { flex-direction: column; gap: 24px; }
+
+section { padding: 60px 20px; }
+
+.services-grid { grid-template-columns: 1fr; }
+.why-grid { grid-template-columns: 1fr 1fr; }
+
+.form-section { padding: 32px 24px; }
+
+.contact-section {
+  grid-template-columns: 1fr;
+  padding: 28px 24px;
+}
+  }
+  @media (max-width: 480px) {
+.why-grid { grid-template-columns: 1fr; }
+.trust-badges { flex-direction: column; align-items: center; }
+.hero h1 { font-size: 30px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav id="navbar">
+  <div class="brand">
+<div class="brand-icon">🔧</div>
+<div class="brand-text">Bob's <span>Plumbing</span></div>
+  </div>
+  <ul class="nav-links">
+<li><a href="#services">Services</a></li>
+<li><a href="#why-us">Why Us</a></li>
+<li><a href="#quote">Free Quote</a></li>
+<li><a href="#contact">Contact</a></li>
+  </ul>
+  <a href="#quote" class="nav-cta">📞 Get a Quote</a>
+  <button class="mobile-toggle" onclick="toggleMobile()" aria-label="Toggle menu">☰</button>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-content">
+<div class="hero-badge">✅ Licensed &bull; Insured &bull; 15+ Years Experience</div>
+<h1>Sydney's Trusted<br><span>Plumbing Service</span></h1>
+<p>Fast, reliable, and professional plumbing services across Sydney. Available 24/7 for emergencies. Your satisfaction is guaranteed.</p>
+<a href="#quote" class="hero-cta">
+  Get a Free Quote
+  <span>→</span>
+</a>
+<div class="hero-stats">
+  <div class="stat">
+    <div class="num">5,000+</div>
+    <div class="label">Jobs Completed</div>
+  </div>
+  <div class="stat">
+    <div class="num">⭐ 4.9</div>
+    <div class="label">Google Rating</div>
+  </div>
+  <div class="stat">
+    <div class="num">15+</div>
+    <div class="label">Years Experience</div>
+  </div>
+</div>
+  </div>
+</section>
+
+<!-- Services -->
+<section id="services">
+  <div class="section-header">
+<div class="tag">What We Do</div>
+<h2>Our Plumbing Services</h2>
+<p>From emergency repairs to complete installations, we handle all your plumbing needs.</p>
+  </div>
+  <div class="services-grid">
+<div class="service-card">
+  <div class="icon">⚡</div>
+  <h3>Emergency Repairs</h3>
+  <p>24/7 emergency plumbing services across Sydney. Burst pipes, severe leaks, and urgent blockages — we're there when you need us most.</p>
+  <span class="tag-247">🔴 24/7 Emergency</span>
+</div>
+<div class="service-card">
+  <div class="icon">🔥</div>
+  <h3>Hot Water Systems</h3>
+  <p>Installation, repair, and replacement of all hot water systems — gas, electric, solar, and heat pump. Same-day service available.</p>
+</div>
+<div class="service-card">
+  <div class="icon">🚫</div>
+  <h3>Blocked Drains</h3>
+  <p>Using advanced CCTV drain cameras and high-pressure jetting to clear even the toughest blockages fast and effectively.</p>
+</div>
+<div class="service-card">
+  <div class="icon">🔥</div>
+  <h3>Gas Fitting</h3>
+  <p>Licensed gas fitters for all gas appliance installations, repairs, and safety inspections. Gas cooktops, heaters, BBQs and more.</p>
+</div>
+<div class="service-card">
+  <div class="icon">🔍</div>
+  <h3>Leak Detection</h3>
+  <p>Non-invasive electronic leak detection technology to find hidden water leaks without breaking walls or floors. Fast and precise.</p>
+</div>
+  </div>
+</section>
+
+<!-- Why Us -->
+<section id="why-us" style="padding-top:0;">
+  <div class="section-header">
+<div class="tag">Why Choose Bob's</div>
+<h2>Why Sydney Trusts Us</h2>
+<p>We don't just fix pipes — we build relationships with quality workmanship.</p>
+  </div>
+  <div class="why-grid">
+<div class="why-item">
+  <div class="icon">🏆</div>
+  <h4>Licensed &amp; Insured</h4>
+  <p>Fully licensed, insured plumbers giving you complete peace of mind.</p>
+</div>
+<div class="why-item">
+  <div class="icon">⏱️</div>
+  <h4>Same-Day Service</h4>
+  <p>Most jobs attended within hours. We respect your time.</p>
+</div>
+<div class="why-item">
+  <div class="icon">💰</div>
+  <h4>Upfront Pricing</h4>
+  <p>No hidden fees. You'll know the cost before any work begins.</p>
+</div>
+<div class="why-item">
+  <div class="icon">💯</div>
+  <h4>Satisfaction Guaranteed</h4>
+  <p>If you're not happy, we'll make it right. No questions asked.</p>
+</div>
+  </div>
+</section>
+
+<!-- Trust / Google -->
+<section style="padding-top:0;padding-bottom:40px;">
+  <div class="trust-section">
+<div class="trust-stars">⭐⭐⭐⭐⭐</div>
+<div class="trust-title">Rated 4.9/5 on Google</div>
+<div class="trust-text">"Bob's Plumbing saved our Christmas dinner! Burst pipe on Christmas Eve and they were here in 30 minutes. Absolute legends."</div>
+<div class="trust-badges">
+  <span class="trust-badge">📋 500+ 5-Star Reviews</span>
+  <span class="trust-badge highlight">🏅 Google Guaranteed</span>
+  <span class="trust-badge">⭐ Top Rated 2024</span>
+</div>
+  </div>
+</section>
+
+<!-- Quote Form -->
+<section id="quote" style="padding-top:0;">
+  <div class="form-section">
+<h3>Get a Free Quote</h3>
+<div class="form-sub">Fill in the form below and we'll get back to you within 1 hour.</div>
+<form id="quote-form" onsubmit="return submitQuote(event)">
+  <div class="form-group">
+    <label class="required">Full Name</label>
+    <input type="text" id="form-name" placeholder="e.g. John Smith" required>
+  </div>
+  <div class="form-group">
+    <label class="required">Phone Number</label>
+    <input type="tel" id="form-phone" placeholder="e.g. 0400 123 456" required>
+    <div class="hint">We'll call you to schedule a free estimate</div>
+  </div>
+  <div class="form-group">
+    <label class="required">Email Address</label>
+    <input type="email" id="form-email" placeholder="e.g. john@example.com" required>
+  </div>
+  <div class="form-group">
+    <label class="required">Service Needed</label>
+    <select id="form-service" required>
+      <option value="">Select a service...</option>
+      <option value="Emergency Repairs">Emergency Repairs</option>
+      <option value="Hot Water System">Hot Water System</option>
+      <option value="Blocked Drains">Blocked Drains</option>
+      <option value="Gas Fitting">Gas Fitting</option>
+      <option value="Leak Detection">Leak Detection</option>
+      <option value="General Plumbing">General Plumbing</option>
+      <option value="Other">Other</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Describe the Issue</label>
+    <textarea id="form-message" placeholder="Tell us about your plumbing issue... e.g. Kitchen sink is blocked, hot water not working"></textarea>
+  </div>
+  <button type="submit" class="form-submit" id="form-submit-btn">📋 Get Free Quote</button>
+  <div class="form-result" id="form-result"></div>
+</form>
+  </div>
+</section>
+
+<!-- Contact -->
+<section id="contact" style="padding-top:0;">
+  <div class="section-header">
+<div class="tag">Get in Touch</div>
+<h2>Contact Us</h2>
+<p>We're here to help. Reach out anytime — day or night.</p>
+  </div>
+  <div class="contact-section" style="max-width:860px;margin:0 auto;">
+<div class="contact-info">
+  <h3>Bob's Plumbing Services</h3>
+  <div class="contact-item">
+    <div class="ci-icon">📞</div>
+    <div>
+      <div class="ci-label">Phone (24/7)</div>
+      <div class="ci-value"><a href="tel:0400123456">0400 123 456</a></div>
+    </div>
+  </div>
+  <div class="contact-item">
+    <div class="ci-icon">✉️</div>
+    <div>
+      <div class="ci-label">Email</div>
+      <div class="ci-value"><a href="mailto:emilio.pegolo1@gmail.com">emilio.pegolo1@gmail.com</a></div>
+    </div>
+  </div>
+  <div class="contact-item">
+    <div class="ci-icon">📍</div>
+    <div>
+      <div class="ci-label">Service Area</div>
+      <div class="ci-value">Sydney Metro &bull; Eastern Suburbs &bull; Inner West</div>
+    </div>
+  </div>
+  <div class="contact-item">
+    <div class="ci-icon">⏰</div>
+    <div>
+      <div class="ci-label">Hours</div>
+      <div class="ci-value">24/7 — Always open for emergencies</div>
+    </div>
+  </div>
+</div>
+<div class="contact-map">
+  <div class="map-icon">🗺️</div>
+  <div class="map-label">Serving all of Sydney Metropolitan Area</div>
+  <div style="font-size:12px;color:#555;">Emergency response within 60 minutes</div>
+</div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="footer-brand">🔧 Bob's Plumbing Services</div>
+  <p>Licensed &bull; Insured &bull; Trusted Since 2010<br>Sydney's go-to for professional plumbing</p>
+  <div class="footer-powered">Powered by <a href="/" style="color:var(--accent);text-decoration:none;font-weight:600;">Automate Pro</a></div>
+</footer>
+
+<script>
+function toggleMobile() {
+  document.getElementById('navbar').classList.toggle('mobile-open');
+}
+
+// Close mobile menu on link click
+document.querySelectorAll('.nav-links a').forEach(a => {
+  a.addEventListener('click', () => {
+document.getElementById('navbar').classList.remove('mobile-open');
+  });
+});
+
+async function submitQuote(e) {
+  e.preventDefault();
+  const btn = document.getElementById('form-submit-btn');
+  const result = document.getElementById('form-result');
+
+  const name = document.getElementById('form-name').value.trim();
+  const phone = document.getElementById('form-phone').value.trim();
+  const email = document.getElementById('form-email').value.trim();
+  const service = document.getElementById('form-service').value;
+  const message = document.getElementById('form-message').value.trim();
+
+  if (!name || !phone || !email || !service) {
+result.textContent = 'Please fill in all required fields.';
+result.className = 'form-result error';
+return false;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  result.className = 'form-result';
+  result.textContent = '';
+
+  try {
+const res = await fetch('https://automate-pro-production.up.railway.app/api/lead', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    name: formData.get('name'),
+                    email: formData.get('email'),
+                    phone: formData.get('phone'),
+                    business_type: 'Trades & Construction',
+                    message: formData.get('message') || formData.get('description'),
+                    notify_email: 'bob@bobsplumbing.com'
+                })
+            })
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    name: name,
+    phone: phone,
+    email: email,
+    business_type: 'Trades & Construction',
+    message: 'Service: ' + service + (message ? ' — ' + message : '')
+  })
+});
+const data = await res.json();
+if (data.success) {
+  result.textContent = '✅ Thanks ' + name + '! We\'ll call you within 1 hour to schedule your free estimate.';
+  result.className = 'form-result success';
+  document.getElementById('quote-form').reset();
+  // Scroll to show the success message
+  result.scrollIntoView({ behavior: 'smooth', block: 'center' });
+} else {
+  result.textContent = '❌ ' + (data.error || 'Something went wrong. Please try again.');
+  result.className = 'form-result error';
+}
+  } catch (err) {
+result.textContent = '❌ Connection error. Please try again.';
+result.className = 'form-result error';
+  }
+
+  btn.disabled = false;
+  btn.textContent = '📋 Get Free Quote';
+  return false;
+}
+</script>
+
+</body>
+</html>"""
+

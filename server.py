@@ -3534,6 +3534,17 @@ async function submitQuote(e) {
 
   try {
     const res = await fetch('/api/lead', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    name: formData.get('name'),
+                    email: formData.get('email'),
+                    phone: formData.get('phone'),
+                    business_type: 'Trades & Construction',
+                    message: formData.get('message') || formData.get('description'),
+                    notify_email: 'bob@bobsplumbing.com'
+                })
+            })
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
