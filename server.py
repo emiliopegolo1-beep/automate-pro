@@ -23,6 +23,7 @@ from flask import (
 
 # Email integration — SMTP (works everywhere, no local token needed)
 import smtplib
+import threading
 from email.mime.text import MIMEText
 
 SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
@@ -31,6 +32,11 @@ SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
 
 def send_email(to, subject, body):
+    """Send email asynchronously — returns immediately."""
+    t = threading.Thread(target=send_email_sync, args=(to, subject, body), daemon=True)
+    t.start()
+    return {"success": True, "async": True}
+def send_email_sync(to, subject, body):
     """Send email via SMTP. Works on Railway with app password."""
     if not SMTP_USER or not SMTP_PASS:
         print(f"[EMAIL DISABLED] Set SMTP_USER and SMTP_PASS env vars to enable")
