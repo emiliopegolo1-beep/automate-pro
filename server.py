@@ -336,14 +336,17 @@ def get_invoice_by_id(invoice_id):
     return dict(row) if row else None
 
 
-def build_invoice_email_body(inv):
+def build_invoice_email_body(inv, stripe_url=None):
+    payment_section = f"\nPay now: {stripe_url}\n" if stripe_url else f"\nView invoice: https://automate-pro-production.up.railway.app/invoice/{inv['id']}\n"
     return (
         f"Hi {inv['client_name']},\n\n"
-        f"Your invoice #{inv['invoice_number']} for ${inv['amount']:.2f} is ready.\n\n"
-        f"View invoice: https://automate-pro-production.up.railway.app/invoice/{inv['id']}\n"
-        f"Due: {inv.get('due_date') or 'Upon receipt'}\n\n"
+        f"Your invoice #{inv['invoice_number']} for ${inv['amount']:.2f} is ready.\n"
+        f"Description: {inv.get('description') or 'Automation Services'}\n".rstrip() + "\n"
+        f"Due: {inv.get('due_date') or 'Upon receipt'}\n"
+        f"{payment_section}"
+        "\n"
         "Thanks,\n"
-        "Emilio\n"
+        "Emilio Pegolo\n"
         "Automate Pro"
     )
 
@@ -1147,18 +1150,44 @@ def api_send_invoice(invoice_id):
     if not inv:
         return jsonify({"error": "Invoice not found"}), 404
 
-    subject = f"Invoice #{inv['invoice_number']} from Automate Pro"
-    body = build_invoice_email_body(inv)
+    # Create Stripe payment link for this invoice
+    stripe_url = None
+    try:
+        amount_cents = int(inv["amount"] * 100)
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": f"Invoice #{inv['invoice_number']} - {inv['description'] or 'Automation Services'}"},
+                    "unit_amount": amount_cents,
+                },
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url=f"https://automate-pro-production.up.railway.app/invoice/{inv['id']}?paid=true",
+            cancel_url=f"https://automate-pro-production.up.railway.app/invoice/{inv['id']}",
+            metadata={"invoice_id": inv["id"]}
+        )
+        stripe_url = session.url
+    except Exception as e:
+        stripe_url = None
 
+    subject = f"Invoice #{inv['invoice_number']} from Automate Pro"
+    body = build_invoice_email_body(inv, stripe_url)
+    
+    # Also save the stripe URL to the invoice
+    conn = get_db()
+    if stripe_url and inv["status"] == "draft":
+        conn.execute("UPDATE invoices SET status = ? WHERE id = ?", ("sent", invoice_id))
+
+    # Send professional HTML-like email
     result = send_email(inv["client_email"], subject, body)
+    conn.commit()
+    conn.close()
+    
     if result.get("success"):
-        # Update status to sent if it was draft
-        if inv["status"] == "draft":
-            conn = get_db()
-            conn.execute("UPDATE invoices SET status = ? WHERE id = ?", ("sent", invoice_id))
-            conn.commit()
-            conn.close()
-        return jsonify({"success": True, "message": f"Invoice sent to {inv['client_email']}"})
+        return jsonify({"success": True, "message": f"Invoice sent to {inv['client_email']}", "stripe_url": stripe_url})
     else:
         return jsonify({"error": result.get("error", "Failed to send email")}), 500
 
