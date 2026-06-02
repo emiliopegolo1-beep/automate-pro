@@ -398,7 +398,7 @@ footer .legal { font-size: 0.8rem; color: var(--text-muted); }
         <p>Fill out the form and I'll get back to you within 24 hours to schedule your free strategy call. No commitment, no pitch — just a conversation about what we can automate.</p>
         <a href="mailto:emilio@example.com" class="email-link">emilio@automatepro.ai</a>
       </div>
-      <form class="contact-form" id="contact-form">
+      <form class="contact-form" id="contact-form" action="javascript:void(0)">
         <div class="form-group">
           <label for="name">Name</label>
           <input type="text" id="name" name="name" placeholder="Your full name" required>
@@ -422,7 +422,7 @@ footer .legal { font-size: 0.8rem; color: var(--text-muted); }
           <label for="message">Message</label>
           <textarea id="message" name="message" placeholder="Tell me about your business and what you'd like to automate..."></textarea>
         </div>
-        <button type="submit" class="btn btn-primary" id="submit-btn"><span class="spinner" id="spinner"></span>Send Message</button>
+        <button type="button" class="btn btn-primary" id="submit-btn" onclick="submitLead()"><span class="spinner" id="spinner"></span>Send Message</button>
         <div class="form-feedback" id="form-feedback"></div>
       </form>
     </div>
@@ -441,57 +441,54 @@ footer .legal { font-size: 0.8rem; color: var(--text-muted); }
 <script>
 // Stripe checkout removed — clients contact Emilio directly for pricing
 // ── Lead capture form ──
-document.addEventListener('DOMContentLoaded', function() {
-  document.getElementById('contact-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    var btn = document.getElementById('submit-btn');
-    var spinner = document.getElementById('spinner');
-    var feedback = document.getElementById('form-feedback');
+function submitLead() {
+  var btn = document.getElementById('submit-btn');
+  var spinner = document.getElementById('spinner');
+  var feedback = document.getElementById('form-feedback');
 
-    var name = document.getElementById('name').value.trim();
-    var email = document.getElementById('email').value.trim();
-    var business = document.getElementById('business').value;
-    var message = document.getElementById('message').value.trim();
+  var name = document.getElementById('name').value.trim();
+  var email = document.getElementById('email').value.trim();
+  var business = document.getElementById('business').value;
+  var message = document.getElementById('message').value.trim();
 
-    feedback.style.display = 'none';
-    feedback.className = 'form-feedback';
+  feedback.style.display = 'none';
+  feedback.className = 'form-feedback';
 
-    btn.disabled = true;
-    spinner.style.display = 'inline-block';
+  btn.disabled = true;
+  spinner.style.display = 'inline-block';
 
-    fetch('/api/lead', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: name,
-        email: email,
-        business_type: business,
-        message: message
-      })
+  fetch('/api/lead', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: name,
+      email: email,
+      business_type: business,
+      message: message
     })
-    .then(function(res) { return res.json(); })
-    .then(function(data) {
-      spinner.style.display = 'none';
-      btn.disabled = false;
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    spinner.style.display = 'none';
+    btn.disabled = false;
 
-      if (data.success) {
-        feedback.textContent = "Thanks " + data.name + "! We'll be in touch within 24 hours.";
-        feedback.className = 'form-feedback success';
-        feedback.style.display = 'block';
-        document.getElementById('contact-form').reset();
-      } else {
-        feedback.textContent = data.error || 'Something went wrong. Try again.';
-        feedback.className = 'form-feedback error';
-        feedback.style.display = 'block';
-      }
-    })
-    .catch(function() {
-      spinner.style.display = 'none';
-      btn.disabled = false;
-      feedback.textContent = 'Connection error. Is the server running?';
+    if (data.success) {
+      feedback.textContent = "Thanks " + data.name + "! We'll be in touch within 24 hours.";
+      feedback.className = 'form-feedback success';
+      feedback.style.display = 'block';
+      document.getElementById('contact-form').reset();
+    } else {
+      feedback.textContent = data.error || 'Something went wrong. Try again.';
       feedback.className = 'form-feedback error';
       feedback.style.display = 'block';
-    });
+    }
+  })
+  .catch(function() {
+    spinner.style.display = 'none';
+    btn.disabled = false;
+    feedback.textContent = 'Connection error. Is the server running?';
+    feedback.className = 'form-feedback error';
+    feedback.style.display = 'block';
   });
-});
+}
 // ── Stripe Checkout ──
