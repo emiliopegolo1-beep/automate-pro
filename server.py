@@ -168,6 +168,10 @@ def init_db():
         ("notes", "TEXT DEFAULT ''"),
         ("revenue", "REAL DEFAULT 0"),
         ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+        ("requirements", "TEXT DEFAULT ''"),
+        ("quoted_price", "REAL DEFAULT 0"),
+        ("follow_up_date", "TEXT DEFAULT ''"),
+        ("source", "TEXT DEFAULT 'website'"),
     ]
     for col_name, col_def in columns_to_add:
         try:
@@ -235,7 +239,7 @@ def get_lead_by_id(lead_id):
 
 def update_lead_in_db(lead_id, updates):
     """Update lead columns. `updates` is a dict of column → value."""
-    allowed = {"name", "email", "business_type", "phone", "status", "notes", "revenue"}
+    allowed = {"name", "email", "business_type", "phone", "status", "notes", "revenue", "requirements", "quoted_price", "follow_up_date", "source"}
     filtered = {k: v for k, v in updates.items() if k in allowed}
     if not filtered:
         return False
@@ -421,7 +425,7 @@ def api_dashboard():
         "SELECT status, COUNT(*) as cnt FROM leads GROUP BY status"
     ).fetchall()
     leads_by_status = {r["status"]: r["cnt"] for r in status_rows}
-    for s in ("new", "contacted", "proposal_sent", "closed_won", "closed_lost"):
+    for s in ("new", "call_scheduled", "call_done", "building", "demo_ready", "delivered", "paid"):
         leads_by_status.setdefault(s, 0)
 
     # Revenue totals (from payments table)
@@ -442,12 +446,12 @@ def api_dashboard():
         "SELECT COUNT(*) FROM leads WHERE created_at >= ?", (week_ago,)
     ).fetchone()[0]
 
-    # Conversion rate
+    # Conversion rate (delivered+paid / touched leads)
     total_new = leads_by_status.get("new", 0)
-    total_won = leads_by_status.get("closed_won", 0)
+    total_won = leads_by_status.get("delivered", 0) + leads_by_status.get("paid", 0)
     total_contacted = sum(
         leads_by_status.get(s, 0)
-        for s in ("contacted", "proposal_sent", "closed_won", "closed_lost")
+        for s in ("call_scheduled", "call_done", "building", "demo_ready", "delivered", "paid")
     )
     conversion_rate = 0
     denominator = total_new + total_contacted
@@ -461,6 +465,12 @@ def api_dashboard():
 
     conn.close()
 
+    # Pending Delivery = building + demo_ready
+    pending_delivery = leads_by_status.get("building", 0) + leads_by_status.get("demo_ready", 0)
+
+    # Active Clients = delivered + paid
+    active_clients = leads_by_status.get("delivered", 0) + leads_by_status.get("paid", 0)
+
     return jsonify(
         {
             "total_leads": total_leads,
@@ -469,6 +479,8 @@ def api_dashboard():
             "total_revenue": total_revenue,
             "new_this_week": new_this_week,
             "conversion_rate": conversion_rate,
+            "pending_delivery": pending_delivery,
+            "active_clients": active_clients,
             "recent_leads": [dict(r) for r in recent],
         }
     )
@@ -819,10 +831,10 @@ def handle_checkout_completed(session_data):
         ),
     )
 
-    # If there's a lead_id, update the lead status to closed_won and set revenue
+    # If there's a lead_id, update the lead status to paid and set revenue
     if lead_id:
         conn.execute(
-            "UPDATE leads SET status = 'closed_won', revenue = COALESCE(revenue, 0) + ? WHERE id = ?",
+            "UPDATE leads SET status = 'paid', revenue = COALESCE(revenue, 0) + ? WHERE id = ?",
             (amount_total, lead_id),
         )
 
@@ -1654,12 +1666,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     color: var(--text-muted);
     margin-top: 6px;
   }
-  .kanban-col .lead-card .revenue-badge {
+  .kanban-col .lead-card .price-badge {
     display: inline-block;
     font-size: 11px;
     font-weight: 600;
-    color: var(--green);
-    background: rgba(0,212,170,0.1);
+    color: var(--accent);
+    background: rgba(255,140,66,0.1);
     padding: 2px 8px;
     border-radius: 4px;
     margin-top: 4px;
@@ -1674,11 +1686,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   }
 
   /* Colored dots for columns */
+  /* Pipeline column colors */
   .kanban-col[data-status="new"] { border-top: 3px solid var(--blue); }
-  .kanban-col[data-status="contacted"] { border-top: 3px solid var(--yellow); }
-  .kanban-col[data-status="proposal_sent"] { border-top: 3px solid var(--accent); }
-  .kanban-col[data-status="closed_won"] { border-top: 3px solid var(--green); }
-  .kanban-col[data-status="closed_lost"] { border-top: 3px solid var(--red); }
+  .kanban-col[data-status="call_scheduled"] { border-top: 3px solid var(--yellow); }
+  .kanban-col[data-status="call_done"] { border-top: 3px solid var(--accent); }
+  .kanban-col[data-status="building"] { border-top: 3px solid var(--pink); }
+  .kanban-col[data-status="demo_ready"] { border-top: 3px solid var(--green-dim); }
+  .kanban-col[data-status="delivered"] { border-top: 3px solid var(--green); }
+  .kanban-col[data-status="paid"] { border-top: 3px solid #00e6b8; }
 
   /* ── Modal ── */
   .modal-overlay {
@@ -1737,10 +1752,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     text-transform: capitalize;
   }
   .badge-new { background: rgba(77,171,247,0.15); color: var(--blue); }
-  .badge-contacted { background: rgba(255,212,59,0.15); color: var(--yellow); }
-  .badge-proposal_sent { background: rgba(255,140,66,0.15); color: var(--accent); }
-  .badge-closed_won { background: rgba(0,212,170,0.15); color: var(--green); }
-  .badge-closed_lost { background: rgba(255,77,106,0.15); color: var(--red); }
+  .badge-call_scheduled { background: rgba(255,212,59,0.15); color: var(--yellow); }
+  .badge-call_done { background: rgba(255,140,66,0.15); color: var(--accent); }
+  .badge-building { background: rgba(255,107,157,0.15); color: var(--pink); }
+  .badge-demo_ready { background: rgba(0,153,119,0.2); color: var(--green-dim); }
+  .badge-delivered { background: rgba(0,212,170,0.15); color: var(--green); }
+  .badge-paid { background: rgba(0,230,184,0.15); color: #00e6b8; }
 
   .modal .form-group { margin-bottom: 16px; }
   .modal .form-group label {
@@ -1959,6 +1976,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="stat-card green"><div class="label">New This Week</div><div class="value" id="stat-week">—</div></div>
     <div class="stat-card accent"><div class="label">Revenue This Month</div><div class="value" id="stat-revenue">$0</div></div>
     <div class="stat-card blue"><div class="label">Conversion Rate</div><div class="value" id="stat-conversion">0%</div></div>
+    <div class="stat-card pink"><div class="label">Pending Delivery</div><div class="value" id="stat-pending">0</div></div>
+    <div class="stat-card" style="border-top:3px solid var(--green-dim);"><div class="label">Active Clients</div><div class="value" id="stat-active">0</div></div>
   </div>
 
   <div class="section-title">Pipeline</div>
@@ -2055,46 +2074,69 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <h3 id="modal-name">—</h3>
     <div class="modal-sub" id="modal-email">—</div>
 
-    <div class="info-grid">
-      <div class="info-item"><div class="label">Business Type</div><div class="value" id="modal-biz">—</div></div>
-      <div class="info-item"><div class="label">Phone</div><div class="value" id="modal-phone">—</div></div>
-      <div class="info-item"><div class="label">Status</div><div class="value"><span class="badge" id="modal-status-badge">new</span></div></div>
-      <div class="info-item"><div class="label">Revenue</div><div class="value" id="modal-revenue">$0</div></div>
-      <div class="info-item full"><div class="label">Message</div><div class="value" id="modal-message" style="font-weight:400;">—</div></div>
-      <div class="info-item full"><div class="label">Created</div><div class="value" id="modal-created" style="font-weight:400;">—</div></div>
-    </div>
-
-    <div class="btn-row">
-      <select class="btn btn-outline btn-sm" id="modal-status-select" onchange="updateLeadStatus()">
-        <option value="new">New</option>
-        <option value="contacted">Contacted</option>
-        <option value="proposal_sent">Proposal Sent</option>
-        <option value="closed_won">Closed Won</option>
-        <option value="closed_lost">Closed Lost</option>
-      </select>
-      <button class="btn btn-green btn-sm" onclick="markWon()">💰 Won</button>
-      <button class="btn btn-red btn-sm" onclick="markLost()">✕ Lost</button>
-      <button class="btn btn-outline btn-sm" onclick="createInvoiceForLead()">📄 Invoice</button>
-    </div>
-
-    <div class="form-group">
-      <label>Revenue ($)</label>
-      <input type="number" id="modal-revenue-input" placeholder="0" step="0.01" min="0" onchange="updateRevenue()">
-    </div>
-
-    <div class="form-group">
-      <label>Notes</label>
-      <textarea id="modal-notes" placeholder="Add notes about this lead..." onchange="updateNotes()"></textarea>
-    </div>
-
-    <div class="email-section">
-      <div class="form-group">
-        <label>Send Email to Lead</label>
-        <input type="text" id="email-subject" placeholder="Subject" style="margin-bottom:8px;">
-        <textarea id="email-body" placeholder="Email body..." style="min-height:100px;"></textarea>
+    <!-- Section 1: Lead Info (Read-only) -->
+    <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);">
+      <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">📋 Lead Info</div>
+      <div class="info-grid">
+        <div class="info-item"><div class="label">Business Type</div><div class="value" id="modal-biz">—</div></div>
+        <div class="info-item"><div class="label">Source</div><div class="value" id="modal-source">—</div></div>
+        <div class="info-item"><div class="label">Status</div><div class="value"><span class="badge" id="modal-status-badge">new</span></div></div>
+        <div class="info-item"><div class="label">Phone</div><div class="value" id="modal-phone">—</div></div>
+        <div class="info-item full"><div class="label">Message</div><div class="value" id="modal-message" style="font-weight:400;">—</div></div>
+        <div class="info-item full"><div class="label">Created</div><div class="value" id="modal-created" style="font-weight:400;">—</div></div>
       </div>
-      <button class="btn btn-accent btn-sm" onclick="sendEmailToLead()">📧 Send Email</button>
-      <div class="email-result" id="email-result"></div>
+    </div>
+
+    <!-- Section 2: Workflow (Editable) -->
+    <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);">
+      <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">⚙️ Workflow</div>
+      <div class="form-group">
+        <label>Status</label>
+        <select id="modal-status-select" onchange="updateLeadStatus()">
+          <option value="new">🆕 New</option>
+          <option value="call_scheduled">📅 Call Scheduled</option>
+          <option value="call_done">✅ Call Done</option>
+          <option value="building">🔧 Building</option>
+          <option value="demo_ready">🎬 Demo Ready</option>
+          <option value="delivered">📦 Delivered</option>
+          <option value="paid">💰 Paid</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Requirements</label>
+        <textarea id="modal-requirements" placeholder="What they need built..." onchange="updateRequirements()"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Quoted Price ($)</label>
+        <input type="number" id="modal-quoted-price" placeholder="0.00" step="0.01" min="0" onchange="updateQuotedPrice()">
+      </div>
+      <div class="form-group">
+        <label>Follow-up Date</label>
+        <input type="date" id="modal-follow-up" onchange="updateFollowUp()">
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea id="modal-notes" placeholder="Add notes about this lead..." onchange="updateNotes()"></textarea>
+      </div>
+    </div>
+
+    <!-- Section 3: Quick Actions -->
+    <div style="margin-bottom:16px;">
+      <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">🚀 Quick Actions</div>
+      <div class="btn-row">
+        <button class="btn btn-green btn-sm" onclick="createInvoiceForLead()">📄 Create Invoice</button>
+        <button class="btn btn-accent btn-sm" onclick="copyCalendlyLink()">🔗 Copy Calendly Link</button>
+        <button class="btn btn-outline btn-sm" onclick="copyRequirementsSummary()">📋 Copy Requirements</button>
+      </div>
+      <div class="email-section">
+        <div class="form-group" style="margin-top:12px;">
+          <label>Send Email to Lead</label>
+          <input type="text" id="email-subject" placeholder="Subject" style="margin-bottom:8px;">
+          <textarea id="email-body" placeholder="Email body..." style="min-height:80px;"></textarea>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="sendEmailToLead()">📧 Send Email</button>
+        <div class="email-result" id="email-result"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -2106,12 +2148,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 let currentLeadId = null;
 const STATUS_LABELS = {
   'new': 'New',
-  'contacted': 'Contacted',
-  'proposal_sent': 'Proposal Sent',
-  'closed_won': 'Closed Won',
-  'closed_lost': 'Closed Lost'
+  'call_scheduled': 'Call Scheduled',
+  'call_done': 'Call Done',
+  'building': 'Building',
+  'demo_ready': 'Demo Ready',
+  'delivered': 'Delivered',
+  'paid': 'Paid'
 };
-const STATUS_COLUMNS = ['new', 'contacted', 'proposal_sent', 'closed_won', 'closed_lost'];
+const STATUS_COLUMNS = ['new', 'call_scheduled', 'call_done', 'building', 'demo_ready', 'delivered', 'paid'];
 
 function $(id) { return document.getElementById(id); }
 
@@ -2149,6 +2193,8 @@ async function loadDashboard() {
   $('stat-week').textContent = data.new_this_week;
   $('stat-revenue').textContent = '$' + Number(data.revenue_this_month).toLocaleString('en-AU', { minimumFractionDigits: 0 });
   $('stat-conversion').textContent = data.conversion_rate + '%';
+  $('stat-pending').textContent = data.pending_delivery || 0;
+  $('stat-active').textContent = data.active_clients || 0;
 
   $('rev-total').textContent = '$' + Number(data.total_revenue).toLocaleString('en-AU', { minimumFractionDigits: 2 });
   $('rev-month').textContent = '$' + Number(data.revenue_this_month).toLocaleString('en-AU', { minimumFractionDigits: 2 });
@@ -2209,7 +2255,7 @@ async function renderKanbanFromLeads(leads) {
         <div class="lead-name">${escapeHtml(lead.name)}</div>
         <div class="lead-biz">${escapeHtml(lead.business_type || '—')}</div>
         <div class="lead-date">${formatDate(lead.created_at)}</div>
-        ${lead.revenue > 0 ? '<div class="revenue-badge">$' + Number(lead.revenue).toLocaleString() + '</div>' : ''}
+        ${lead.quoted_price > 0 ? '<div class="price-badge">Quoted: $' + Number(lead.quoted_price).toLocaleString() + '</div>' : ''}
       `;
       card.onclick = () => openLeadDetail(lead.id);
       cardsContainer.appendChild(card);
@@ -2235,18 +2281,22 @@ async function openLeadDetail(id) {
   $('modal-email').textContent = lead.email;
   $('modal-biz').textContent = lead.business_type || '—';
   $('modal-phone').textContent = lead.phone || '—';
+  $('modal-source').textContent = lead.source || 'website';
   $('modal-message').textContent = lead.message || '—';
   $('modal-created').textContent = formatDate(lead.created_at);
-  $('modal-revenue').textContent = '$' + Number(lead.revenue || 0).toLocaleString('en-AU', { minimumFractionDigits: 2 });
 
   const badge = $('modal-status-badge');
   badge.textContent = STATUS_LABELS[lead.status] || 'New';
   badge.className = 'badge badge-' + (lead.status || 'new');
 
+  // Workflow fields
   $('modal-status-select').value = lead.status || 'new';
+  $('modal-requirements').value = lead.requirements || '';
+  $('modal-quoted-price').value = lead.quoted_price || '';
+  $('modal-follow-up').value = lead.follow_up_date || '';
   $('modal-notes').value = lead.notes || '';
-  $('modal-revenue-input').value = lead.revenue || '';
 
+  // Email fields
   $('email-subject').value = '';
   $('email-body').value = '';
   $('email-result').className = 'email-result';
@@ -2266,6 +2316,7 @@ async function updateLeadStatus() {
   const badge = $('modal-status-badge');
   badge.textContent = STATUS_LABELS[status];
   badge.className = 'badge badge-' + status;
+  toast('Status updated to ' + STATUS_LABELS[status], 'success');
   loadDashboard();
 }
 
@@ -2275,32 +2326,24 @@ async function updateNotes() {
   toast('Notes saved', 'success');
 }
 
-async function updateRevenue() {
-  const rev = parseFloat($('modal-revenue-input').value) || 0;
-  await updateField('revenue', rev);
-  $('modal-revenue').textContent = '$' + rev.toLocaleString('en-AU', { minimumFractionDigits: 2 });
-  loadDashboard();
-  toast('Revenue updated', 'success');
+async function updateRequirements() {
+  const req = $('modal-requirements').value;
+  await updateField('requirements', req);
+  toast('Requirements saved', 'success');
 }
 
-async function markWon() {
-  await updateField('status', 'closed_won');
-  $('modal-status-select').value = 'closed_won';
-  const badge = $('modal-status-badge');
-  badge.textContent = 'Closed Won';
-  badge.className = 'badge badge-closed_won';
-  toast('Lead marked as Won! 🎉', 'success');
-  loadDashboard();
+async function updateQuotedPrice() {
+  const price = parseFloat($('modal-quoted-price').value) || 0;
+  await updateField('quoted_price', price);
+  toast('Price quoted: $' + price.toFixed(2), 'success');
 }
 
-async function markLost() {
-  await updateField('status', 'closed_lost');
-  $('modal-status-select').value = 'closed_lost';
-  const badge = $('modal-status-badge');
-  badge.textContent = 'Closed Lost';
-  badge.className = 'badge badge-closed_lost';
-  toast('Lead marked as Lost', 'success');
-  loadDashboard();
+async function updateFollowUp() {
+  const date = $('modal-follow-up').value;
+  await updateField('follow_up_date', date);
+  if (date) {
+    toast('Follow-up set for ' + formatDate(date), 'success');
+  }
 }
 
 async function updateField(key, value) {
@@ -2309,6 +2352,43 @@ async function updateField(key, value) {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ [key]: value })
+  });
+}
+
+// ── Quick Actions ──
+function copyCalendlyLink() {
+  const link = 'https://calendly.com/emilio-pegolo1/30min';
+  navigator.clipboard.writeText(link).then(() => {
+    toast('📅 Calendly link copied!', 'success');
+  }).catch(() => {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = link;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('📅 Calendly link copied!', 'success');
+  });
+}
+
+function copyRequirementsSummary() {
+  if (!currentLeadId) return;
+  const name = $('modal-name').textContent;
+  const biz = $('modal-biz').textContent;
+  const req = $('modal-requirements').value || 'Not specified';
+  const price = $('modal-quoted-price').value || 'Not quoted';
+  const summary = `Client: ${name}\nBusiness: ${biz}\nRequirements: ${req}\nQuoted Price: $${price}\n---\nGenerated by Automate Pro`;
+  navigator.clipboard.writeText(summary).then(() => {
+    toast('📋 Requirements summary copied!', 'success');
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = summary;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('📋 Requirements summary copied!', 'success');
   });
 }
 
@@ -2426,9 +2506,9 @@ function createInvoiceForLead() {
     if (!lead) return;
     $('inv-client-name').value = lead.name || '';
     $('inv-client-email').value = lead.email || '';
-    $('inv-amount').value = '';
-    $('inv-description').value = '';
-    $('inv-due-date').value = '';
+    $('inv-amount').value = lead.quoted_price > 0 ? lead.quoted_price : '';
+    $('inv-description').value = (lead.requirements || '') + ' - Automation Service';
+    $('inv-due-date').value = lead.follow_up_date || '';
     $('inv-lead-id').value = currentLeadId;
     $('inv-lead-group').style.display = 'block';
     $('create-invoice-result').className = 'email-result';
@@ -2497,7 +2577,7 @@ function switchTab(tab) {
 
   // Hide all non-sidebar panels first
   $('invoices-tab').style.display = 'none';
-  document.querySelectorAll('.section-title, .revenue-title').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.section-title, #revenue-title').forEach(el => el.style.display = 'none');
   $('main-content').querySelector('h2').style.display = 'block';
 
   if (tab === 'dashboard') {
