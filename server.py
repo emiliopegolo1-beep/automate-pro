@@ -2124,6 +2124,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div style="margin-bottom:16px;">
       <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">🚀 Quick Actions</div>
       <div class="btn-row">
+        <button class="btn btn-build btn-sm" onclick="buildNow()" style="background:#00d4aa;color:#0a0a0f;border:none;padding:8px 14px;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">🤖 Build Now</button>
         <button class="btn btn-green btn-sm" onclick="createInvoiceForLead()">📄 Create Invoice</button>
         <button class="btn btn-accent btn-sm" onclick="copyCalendlyLink()">🔗 Copy Calendly Link</button>
         <button class="btn btn-outline btn-sm" onclick="copyRequirementsSummary()">📋 Copy Requirements</button>
@@ -2356,6 +2357,23 @@ async function updateField(key, value) {
 }
 
 // ── Quick Actions ──
+function buildNow() {
+  const modal = document.querySelector('.ll-modal-overlay.show');
+  if (!modal) return;
+  const reqEl = document.getElementById('lead-requirements');
+  const priceEl = document.getElementById('lead-quoted-price');
+  const nameEl = document.querySelector('.ll-lead-name');
+  const name = nameEl ? nameEl.textContent || 'Unknown' : 'Unknown';
+  const req = reqEl ? reqEl.value || 'No requirements specified' : 'No requirements';
+  const price = priceEl ? priceEl.value || 'Not set' : 'Not set';
+  const text = 'Client: ' + name + '\\nRequirements: ' + req + '\\nBudget: $' + price;
+  navigator.clipboard.writeText(text).then(() => {
+    toast('✅ Copied! Now tell Jarvis: "Build this automation"', 'success');
+  }).catch(() => {
+    prompt('Copy this text and send to Jarvis:', text);
+  });
+}
+
 function copyCalendlyLink() {
   const link = 'https://calendly.com/emilio-pegolo1/30min';
   navigator.clipboard.writeText(link).then(() => {
