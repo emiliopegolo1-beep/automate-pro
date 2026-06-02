@@ -315,65 +315,38 @@ footer .legal { font-size: 0.8rem; color: var(--text-muted); }
 
 <section class="section" id="services">
   <div class="container">
-    <div class="section-label">Services</div>
-    <h2>Automation packages built<br>for results</h2>
+    <div class="section-label">What I Build</div>
+    <h2>AI automation for your business —<br>examples of what's possible</h2>
     <div class="services-grid">
-      <div class="service-card">
-        <div class="tier-name">Starter</div>
-        <div class="tier-price">
-          <span class="setup">$497</span><span class="label">/setup</span>
-          &nbsp;+&nbsp;
-          <span class="mo">$197</span><span class="label">/mo</span>
-        </div>
-        <ul>
-          <li>2 custom automations</li>
-          <li>Lead capture workflow</li>
-          <li>Email auto-responder</li>
-          <li>Monthly optimization</li>
-        </ul>
-        <div class="payment-buttons">
-          
-          
-        </div>
+      
+      <div class="service-card" style="border-top:3px solid #00d4aa;">
+        <div class="tier-name" style="font-size:16px;">Lead Capture + Auto-Reply</div>
+        <p style="color:#8b8b9e;font-size:13px;line-height:1.6;margin-top:12px;">
+          A form on your website that captures every inquiry. Automatically replies to customers and emails you the details. Never miss a lead again.
+        </p>
+        <p style="color:#4a4a5c;font-size:12px;margin-top:16px;">Example: Bob's Plumbing → $497 setup + $197/mo</p>
       </div>
-      <div class="service-card featured">
-        <div class="tier-name">Growth</div>
-        <div class="tier-price">
-          <span class="setup">$997</span><span class="label">/setup</span>
-          &nbsp;+&nbsp;
-          <span class="mo">$497</span><span class="label">/mo</span>
-        </div>
-        <ul>
-          <li>5 custom automations</li>
-          <li>Lead → CRM → Follow-up pipeline</li>
-          <li>Invoice automation</li>
-          <li>SMS notifications</li>
-          <li>Weekly performance reports</li>
-        </ul>
-        <div class="payment-buttons">
-          
-          
-        </div>
+      
+      <div class="service-card featured" style="border-top:3px solid #ff8c42;">
+        <div class="tier-name" style="font-size:16px;">Professional Website + Google Maps</div>
+        <p style="color:#8b8b9e;font-size:13px;line-height:1.6;margin-top:12px;">
+          A one-page website with your services, Google Maps location, customer reviews, and contact form. Works on phones. Hosted on your own domain.
+        </p>
+        <p style="color:#4a4a5c;font-size:12px;margin-top:16px;">Example: Tradie website → $997 setup + $497/mo</p>
       </div>
-      <div class="service-card">
-        <div class="tier-name">Scale</div>
-        <div class="tier-price">
-          <span class="setup">$1,997</span><span class="label">/setup</span>
-          &nbsp;+&nbsp;
-          <span class="mo">$997</span><span class="label">/mo</span>
-        </div>
-        <ul>
-          <li>Unlimited automations</li>
-          <li>Full business system integration</li>
-          <li>Custom dashboard</li>
-          <li>Priority support</li>
-          <li>Same-day response</li>
-        </ul>
-        <div class="payment-buttons">
-          
-          
-        </div>
+      
+      <div class="service-card" style="border-top:3px solid #4dabf7;">
+        <div class="tier-name" style="font-size:16px;">Booking + Calendar Sync</div>
+        <p style="color:#8b8b9e;font-size:13px;line-height:1.6;margin-top:12px;">
+          Customers book appointments directly. Auto-syncs to your phone calendar. Reminders sent so nobody misses their booking.
+        </p>
+        <p style="color:#4a4a5c;font-size:12px;margin-top:16px;">Starts at $297/mo — custom quote</p>
       </div>
+      
+    </div>
+    <div style="text-align:center;margin-top:40px;">
+      <p style="color:#6b6b80;font-size:14px;margin-bottom:16px;">Every business is different — I'll quote based on exactly what you need.</p>
+      <a href="#contact" class="btn btn-primary">Get a Free Quote</a>
     </div>
   </div>
 </section>
@@ -521,45 +494,3 @@ document.getElementById('contact-form').addEventListener('submit', function(e) {
 });
 
 // ── Stripe Checkout ──
-function startCheckout(planKey) {
-  // Show loading state on button
-  var buttons = document.querySelectorAll('.btn-pay');
-  buttons.forEach(function(b) { b.disabled = true; b.textContent = 'Opening...'; });
-
-  fetch('/api/create-checkout-session', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ plan: planKey })
-  })
-  .then(function(res) { return res.json(); })
-  .then(function(data) {
-    buttons.forEach(function(b) { b.disabled = false; });
-    if (data.url) {
-      window.location.href = data.url;
-    } else {
-      alert('Error: ' + (data.error || 'Could not create checkout session'));
-      // Reset button texts
-      resetButtons();
-    }
-  })
-  .catch(function() {
-    buttons.forEach(function(b) { b.disabled = false; });
-    alert('Connection error. Is the server running?');
-    resetButtons();
-  });
-}
-
-function resetButtons() {
-  var buttons = document.querySelectorAll('.btn-pay');
-  buttons.forEach(function(b) { b.disabled = false; });
-  // Restore original text
-  document.querySelectorAll('[onclick*="starter_setup"]').forEach(function(b) { if (b.tagName === 'BUTTON') b.textContent = 'Buy Setup — $497'; });
-  document.querySelectorAll('[onclick*="starter_monthly"]').forEach(function(b) { if (b.tagName === 'BUTTON') b.textContent = 'Subscribe — $197/mo'; });
-  document.querySelectorAll('[onclick*="growth_setup"]').forEach(function(b) { if (b.tagName === 'BUTTON') b.textContent = 'Buy Setup — $997'; });
-  document.querySelectorAll('[onclick*="growth_monthly"]').forEach(function(b) { if (b.tagName === 'BUTTON') b.textContent = 'Subscribe — $497/mo'; });
-  document.querySelectorAll('[onclick*="scale_setup"]').forEach(function(b) { if (b.tagName === 'BUTTON') b.textContent = 'Buy Setup — $1,997'; });
-  document.querySelectorAll('[onclick*="scale_monthly"]').forEach(function(b) { if (b.tagName === 'BUTTON') b.textContent = 'Subscribe — $997/mo'; });
-}
-</script>
-</body>
-</html>

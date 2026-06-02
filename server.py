@@ -1184,6 +1184,31 @@ def api_config():
 def api_create_checkout_session():
     data = request.get_json() or {}
     
+    # Handle invoice payment (from Pay Now button on invoice page)
+    if data.get("type") == "invoice" and data.get("amount"):
+        try:
+            amount_cents = int(data["amount"])
+            desc = data.get("description", "Invoice Payment")
+            inv_id = data.get("invoice_id", "")
+            session = stripe.checkout.Session.create(
+                payment_method_types=["card"],
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {"name": desc},
+                        "unit_amount": amount_cents,
+                    },
+                    "quantity": 1,
+                }],
+                mode="payment",
+                success_url=request.host_url + "checkout/success",
+                cancel_url=request.host_url,
+                metadata={"invoice_id": inv_id}
+            )
+            return jsonify({"url": session.url, "sessionId": session.id})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+    
     # Support custom invoice payment
     if data.get("plan") == "custom" and data.get("amount"):
         try:
@@ -1278,13 +1303,30 @@ def handle_checkout_completed(session_data):
     metadata = session_data.get("metadata", {}) or {}
     plan_key = metadata.get("plan_key", "unknown")
     lead_id = metadata.get("lead_id")
+    invoice_id = metadata.get("invoice_id", "")
     customer_email = session_data.get("customer_details", {}).get("email", "") or ""
 
     # Calculate amount from the session
     amount_total = session_data.get("amount_total", 0) / 100.0
     currency = session_data.get("currency", "usd") or "usd"
 
-    # Determine plan display name and payment type
+    # Handle invoice payments
+    if invoice_id:
+        conn = get_db()
+        conn.execute("UPDATE invoices SET status = 'paid', paid_at = datetime('now') WHERE id = ?", (invoice_id,))
+        conn.commit()
+        # Send receipt email
+        inv = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+        conn.close()
+        if inv:
+            receipt_subject = f"Receipt — Invoice #{inv[8]} Paid"
+            receipt_body = f"Hi {inv[2]},\n\nYour invoice #{inv[8]} for ${inv[4]:.2f} has been paid.\n\nAmount paid: ${inv[4]:.2f}\nDate: $(datetime.now().strftime('%Y-%m-%d %H:%M'))\n\nThank you for your business!\n\nEmilio\nAutomate Pro"
+            send_email(inv[3], receipt_subject, receipt_body)
+            # Notify Emilio
+            notify = f"✅ Invoice #{inv[8]} paid — ${inv[4]:.2f} from {inv[2]}"
+            send_email("emilio.pegolo1@gmail.com", "Payment Received: Invoice #" + inv[8], notify)
+        return
+
     plan = PLANS.get(plan_key, {})
     plan_name = plan.get("name", plan_key)
     payment_type = "setup" if plan.get("type") == "one_time" else "subscription"
