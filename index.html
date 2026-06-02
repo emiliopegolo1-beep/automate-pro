@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<script src="https://js.stripe.com/v3/"></script>
+
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -332,8 +332,8 @@ footer .legal { font-size: 0.8rem; color: var(--text-muted); }
           <li>Monthly optimization</li>
         </ul>
         <div class="payment-buttons">
-          <button class="btn btn-outline btn-pay" onclick="startCheckout('starter_setup')">Buy Setup — $497</button>
-          <button class="btn btn-outline btn-pay btn-sub" onclick="startCheckout('starter_monthly')">Subscribe — $197/mo</button>
+          
+          
         </div>
       </div>
       <div class="service-card featured">
@@ -351,8 +351,8 @@ footer .legal { font-size: 0.8rem; color: var(--text-muted); }
           <li>Weekly performance reports</li>
         </ul>
         <div class="payment-buttons">
-          <button class="btn btn-primary btn-pay" onclick="startCheckout('growth_setup')">Buy Setup — $997</button>
-          <button class="btn btn-outline btn-pay btn-sub" onclick="startCheckout('growth_monthly')">Subscribe — $497/mo</button>
+          
+          
         </div>
       </div>
       <div class="service-card">
@@ -370,8 +370,8 @@ footer .legal { font-size: 0.8rem; color: var(--text-muted); }
           <li>Same-day response</li>
         </ul>
         <div class="payment-buttons">
-          <button class="btn btn-outline btn-pay" onclick="startCheckout('scale_setup')">Buy Setup — $1,997</button>
-          <button class="btn btn-outline btn-pay btn-sub" onclick="startCheckout('scale_monthly')">Subscribe — $997/mo</button>
+          
+          
         </div>
       </div>
     </div>
@@ -466,6 +466,7 @@ footer .legal { font-size: 0.8rem; color: var(--text-muted); }
 <div class="toast" id="toast">Message sent! I'll be in touch within 24 hours.</div>
 
 <script>
+// Stripe checkout removed — clients contact Emilio directly for pricing
 // ── Lead capture form ──
 document.getElementById('contact-form').addEventListener('submit', function(e) {
   e.preventDefault();
