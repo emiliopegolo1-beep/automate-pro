@@ -315,38 +315,53 @@ footer .legal { font-size: 0.8rem; color: var(--text-muted); }
 
 <section class="section" id="services">
   <div class="container">
-    <div class="section-label">What I Build</div>
-    <h2>AI automation for your business —<br>examples of what's possible</h2>
+    <div class="section-label">Services</div>
+    <h2>Automation packages built<br>for results</h2>
     <div class="services-grid">
-      
-      <div class="service-card" style="border-top:3px solid #00d4aa;">
-        <div class="tier-name" style="font-size:16px;">Lead Capture + Auto-Reply</div>
-        <p style="color:#8b8b9e;font-size:13px;line-height:1.6;margin-top:12px;">
-          A form on your website that captures every inquiry. Automatically replies to customers and emails you the details. Never miss a lead again.
-        </p>
-        <p style="color:#4a4a5c;font-size:12px;margin-top:16px;">Example: Bob's Plumbing → $497 setup + $197/mo</p>
+      <div class="service-card">
+        <div class="tier-name">Starter</div>
+        <div class="tier-price">
+          <span class="setup">$497</span><span class="label">/setup</span>
+          &nbsp;+&nbsp;
+          <span class="mo">$197</span><span class="label">/mo</span>
+        </div>
+        <ul>
+          <li>2 custom automations</li>
+          <li>Lead capture workflow</li>
+          <li>Email auto-responder</li>
+          <li>Monthly optimization</li>
+        </ul>
       </div>
-      
-      <div class="service-card featured" style="border-top:3px solid #ff8c42;">
-        <div class="tier-name" style="font-size:16px;">Professional Website + Google Maps</div>
-        <p style="color:#8b8b9e;font-size:13px;line-height:1.6;margin-top:12px;">
-          A one-page website with your services, Google Maps location, customer reviews, and contact form. Works on phones. Hosted on your own domain.
-        </p>
-        <p style="color:#4a4a5c;font-size:12px;margin-top:16px;">Example: Tradie website → $997 setup + $497/mo</p>
+      <div class="service-card featured">
+        <div class="tier-name">Growth</div>
+        <div class="tier-price">
+          <span class="setup">$997</span><span class="label">/setup</span>
+          &nbsp;+&nbsp;
+          <span class="mo">$497</span><span class="label">/mo</span>
+        </div>
+        <ul>
+          <li>5 custom automations</li>
+          <li>Lead → CRM → Follow-up pipeline</li>
+          <li>Invoice automation</li>
+          <li>SMS notifications</li>
+          <li>Weekly performance reports</li>
+        </ul>
       </div>
-      
-      <div class="service-card" style="border-top:3px solid #4dabf7;">
-        <div class="tier-name" style="font-size:16px;">Booking + Calendar Sync</div>
-        <p style="color:#8b8b9e;font-size:13px;line-height:1.6;margin-top:12px;">
-          Customers book appointments directly. Auto-syncs to your phone calendar. Reminders sent so nobody misses their booking.
-        </p>
-        <p style="color:#4a4a5c;font-size:12px;margin-top:16px;">Starts at $297/mo — custom quote</p>
+      <div class="service-card">
+        <div class="tier-name">Scale</div>
+        <div class="tier-price">
+          <span class="setup">$1,997</span><span class="label">/setup</span>
+          &nbsp;+&nbsp;
+          <span class="mo">$997</span><span class="label">/mo</span>
+        </div>
+        <ul>
+          <li>Unlimited automations</li>
+          <li>Full business system integration</li>
+          <li>Custom dashboard</li>
+          <li>Priority support</li>
+          <li>Same-day response</li>
+        </ul>
       </div>
-      
-    </div>
-    <div style="text-align:center;margin-top:40px;">
-      <p style="color:#6b6b80;font-size:14px;margin-bottom:16px;">Every business is different — I'll quote based on exactly what you need.</p>
-      <a href="#contact" class="btn btn-primary">Get a Free Quote</a>
     </div>
   </div>
 </section>
@@ -398,7 +413,7 @@ footer .legal { font-size: 0.8rem; color: var(--text-muted); }
         <p>Fill out the form and I'll get back to you within 24 hours to schedule your free strategy call. No commitment, no pitch — just a conversation about what we can automate.</p>
         <a href="mailto:emilio@example.com" class="email-link">emilio@automatepro.ai</a>
       </div>
-      <form class="contact-form" id="contact-form" action="javascript:void(0)">
+      <form class="contact-form" id="contact-form">
         <div class="form-group">
           <label for="name">Name</label>
           <input type="text" id="name" name="name" placeholder="Your full name" required>
@@ -422,7 +437,7 @@ footer .legal { font-size: 0.8rem; color: var(--text-muted); }
           <label for="message">Message</label>
           <textarea id="message" name="message" placeholder="Tell me about your business and what you'd like to automate..."></textarea>
         </div>
-        <button type="button" class="btn btn-primary" id="submit-btn" onclick="submitLead()"><span class="spinner" id="spinner"></span>Send Message</button>
+        <button type="submit" class="btn btn-primary" id="submit-btn"><span class="spinner" id="spinner"></span>Send Message</button>
         <div class="form-feedback" id="form-feedback"></div>
       </form>
     </div>
@@ -439,9 +454,9 @@ footer .legal { font-size: 0.8rem; color: var(--text-muted); }
 <div class="toast" id="toast">Message sent! I'll be in touch within 24 hours.</div>
 
 <script>
-// Stripe checkout removed — clients contact Emilio directly for pricing
 // ── Lead capture form ──
-function submitLead() {
+document.getElementById('contact-form').addEventListener('submit', function(e) {
+  e.preventDefault();
   var btn = document.getElementById('submit-btn');
   var spinner = document.getElementById('spinner');
   var feedback = document.getElementById('form-feedback');
@@ -490,5 +505,5 @@ function submitLead() {
     feedback.className = 'form-feedback error';
     feedback.style.display = 'block';
   });
-}
-// ── Stripe Checkout ──
+});
+
