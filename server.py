@@ -40,10 +40,11 @@ def send_email(to, subject, body):
         msg["To"] = to
         msg["Subject"] = subject
         msg["From"] = SMTP_USER
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_USER, [to], msg.as_string())
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(SMTP_USER, [to], msg.as_string())
+        server.quit()
         return {"success": True}
     except Exception as e:
         print(f"[EMAIL ERROR] {e}")
