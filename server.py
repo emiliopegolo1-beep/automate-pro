@@ -19,6 +19,7 @@ from flask import (
     redirect,
     url_for,
     render_template_string,
+    send_from_directory,
 )
 
 # Email integration — Gmail API (uses stored refresh token, no SMTP needed)
@@ -414,7 +415,7 @@ def serve_about():
 def serve_contact():
     return serve_react("index.html")
 
-@app.route("/react-assets/<path:filename>")
+@app.route("/assets/<path:filename>")
 def serve_react_assets(filename):
     return serve_react("assets/" + filename)
 
@@ -431,9 +432,19 @@ REACT_DIST = os.path.join(os.path.dirname(__file__), "react-dist")
 def serve_react(path):
     full = os.path.join(REACT_DIST, path)
     if os.path.isfile(full):
-        with open(full, "r") as f:
-            return f.read()
+        return send_from_directory(REACT_DIST, path)
     return "File not found", 404
+
+
+# ── React SPA catch-all (for any route not matched above) ──────────────────
+
+@app.route("/<path:fallback_path>")
+def serve_react_fallback(fallback_path):
+    # Don't catch API routes, dashboard, or other existing routes
+    if fallback_path.startswith("api/") or fallback_path.startswith("portal/") or \
+       fallback_path.startswith("checkout/") or fallback_path.startswith("demos/"):
+        return "Not found", 404
+    return serve_react("index.html")
 
 
 # ── AI Chat (DeepSeek) ──────────────────────────────────────────────────────────
