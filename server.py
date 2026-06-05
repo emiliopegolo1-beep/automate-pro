@@ -765,22 +765,24 @@ CLIENT_PORTAL_DASHBOARD_HTML = """<!DOCTYPE html>
 <title>{{client_name}} — Lead Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
-    --bg: #0a0a0f;
-    --surface: #12121a;
-    --surface-2: #1a1a26;
-    --border: #2a2a3a;
-    --text: #e0e0e0;
-    --text-muted: #888;
-    --accent: #ff8c42;
-    --accent-hover: #e07a30;
-    --green: #00d4aa;
+    --bg: #0F172A;
+    --surface: #1E293B;
+    --surface-2: #334155;
+    --border: rgba(255,255,255,0.08);
+    --text: #F8FAFC;
+    --text-muted: #94A3B8;
+    --accent: #F59E0B;
+    --accent-hover: #D97706;
+    --green: #22C55E;
+    --red: #EF4444;
+    --blue: #3B82F6;
   }
   body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
@@ -796,7 +798,7 @@ CLIENT_PORTAL_DASHBOARD_HTML = """<!DOCTYPE html>
     border-bottom: 1px solid var(--border);
   }
   .header-left { display: flex; align-items: center; gap: 12px; }
-  .header-left .icon { font-size: 32px; }
+  .header-left .icon { color: var(--accent); display: flex; align-items: center; }
   .header-left h1 { font-size: 24px; font-weight: 700; color: #fff; }
   .header-left .sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
   .header .logout-btn {
@@ -811,8 +813,11 @@ CLIENT_PORTAL_DASHBOARD_HTML = """<!DOCTYPE html>
     transition: all 0.15s;
     font-family: inherit;
     text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
-  .header .logout-btn:hover { color: #ff4d6a; border-color: #ff4d6a; }
+  .header .logout-btn:hover { color: var(--red); border-color: var(--red); }
   .stats-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -826,7 +831,7 @@ CLIENT_PORTAL_DASHBOARD_HTML = """<!DOCTYPE html>
     padding: 20px 24px;
   }
   .stat-card .label { font-size: 13px; color: var(--text-muted); font-weight: 500; margin-bottom: 6px; }
-  .stat-card .value { font-size: 32px; font-weight: 700; color: #fff; }
+  .stat-card .value { font-size: 32px; font-weight: 700; color: #fff; font-family: 'Fira Code', monospace; }
   .stat-card.accent .value { color: var(--accent); }
   .stat-card.green .value { color: var(--green); }
   .table-card {
@@ -849,6 +854,7 @@ CLIENT_PORTAL_DASHBOARD_HTML = """<!DOCTYPE html>
     font-weight: 600;
     border-bottom: 1px solid var(--border);
     background: var(--surface-2);
+    font-family: 'Fira Code', monospace;
   }
   .data-table td {
     padding: 14px 20px;
@@ -857,13 +863,13 @@ CLIENT_PORTAL_DASHBOARD_HTML = """<!DOCTYPE html>
     color: var(--text);
   }
   .data-table tr:last-child td { border-bottom: none; }
-  .data-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .data-table tr:hover td { background: rgba(255,255,255,0.03); }
   .data-table .empty-state {
     text-align: center;
     padding: 48px 20px;
     color: var(--text-muted);
   }
-  .data-table .empty-state .big-icon { font-size: 48px; margin-bottom: 12px; }
+  .data-table .empty-state .big-icon { margin-bottom: 12px; color: var(--text-muted); display: flex; justify-content: center; }
   .data-table .empty-state p { font-size: 15px; }
   .badge {
     display: inline-block;
@@ -873,10 +879,10 @@ CLIENT_PORTAL_DASHBOARD_HTML = """<!DOCTYPE html>
     font-weight: 600;
     text-transform: capitalize;
   }
-  .badge-new { background: rgba(77,171,247,0.15); color: #4dabf7; }
-  .badge-contacted { background: rgba(255,212,59,0.15); color: #ffd43b; }
-  .badge-closed { background: rgba(0,212,170,0.15); color: var(--green); }
-  .badge-default { background: rgba(136,136,136,0.15); color: var(--text-muted); }
+  .badge-new { background: rgba(59,130,246,0.15); color: var(--blue); }
+  .badge-contacted { background: rgba(245,158,11,0.15); color: var(--accent); }
+  .badge-closed { background: rgba(34,197,94,0.15); color: var(--green); }
+  .badge-default { background: rgba(148,163,184,0.15); color: var(--text-muted); }
   .footer {
     text-align: center;
     padding: 24px;
@@ -898,13 +904,22 @@ CLIENT_PORTAL_DASHBOARD_HTML = """<!DOCTYPE html>
 <div class="container">
   <div class="header">
     <div class="header-left">
-      <div class="icon">📋</div>
+      <div class="icon">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>
+        </svg>
+      </div>
       <div>
         <h1>{{client_name}}</h1>
         <div class="sub">Lead Dashboard</div>
       </div>
     </div>
-    <button class="logout-btn" onclick="logout()">🚪 Sign Out</button>
+    <button class="logout-btn" onclick="logout()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+      </svg>
+      Sign Out
+    </button>
   </div>
 
   <div class="stats-row">
@@ -942,7 +957,7 @@ async function loadLeads() {
 
   if (!data.leads || data.leads.length === 0) {
     tbody.innerHTML = `<tr><td colspan="5" class="empty-state">
-      <div class="big-icon">📭</div>
+      <div class="big-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></div>
       <p>No leads yet. When someone contacts you from your website, they'll show up here.</p>
     </td></tr>`;
     document.getElementById('stat-total').textContent = '0';
@@ -1744,7 +1759,7 @@ CHECKOUT_SUCCESS_HTML = """<!DOCTYPE html>
     width: 72px;
     height: 72px;
     margin: 0 auto 24px;
-    background: rgba(0,212,170,0.1);
+    background: rgba(34,197,94,0.1);
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -2044,7 +2059,7 @@ INVOICE_PAGE_HTML = """<!DOCTYPE html>
   }
   .status-badge.draft { background: rgba(136,136,136,0.15); color: var(--text-muted); }
   .status-badge.sent { background: rgba(77,171,247,0.15); color: var(--blue); }
-  .status-badge.paid { background: rgba(0,212,170,0.15); color: var(--green); }
+  .status-badge.paid { background: rgba(34,197,94,0.15); color: var(--green); }
   .status-badge.overdue { background: rgba(255,77,106,0.15); color: var(--red); }
   .status-badge.cancelled { background: rgba(136,136,136,0.15); color: var(--text-muted); }
 
@@ -2223,7 +2238,7 @@ INVOICE_PAGE_HTML = """<!DOCTYPE html>
           <div style="font-size:20px;font-weight:700;color:#fff;">${{'{:,.2f}'.format(inv['sub_amount'])}}<span style="font-size:13px;font-weight:400;color:var(--text-muted);">/{{inv.get('sub_interval') or 'mo'}}</span></div>
         </div>
         <div style="margin-top:8px;">
-          <span class="status-badge" style="{% if inv.get('sub_status') == 'active' %}background:rgba(0,212,170,0.15);color:var(--green);{% elif inv.get('sub_status') == 'cancelled' %}background:rgba(255,77,106,0.15);color:var(--red);{% else %}background:rgba(77,171,247,0.15);color:var(--blue);{% endif %}">{{inv.get('sub_status') or 'pending'}}</span>
+          <span class="status-badge" style="{% if inv.get('sub_status') == 'active' %}background:rgba(34,197,94,0.15);color:var(--green);{% elif inv.get('sub_status') == 'cancelled' %}background:rgba(255,77,106,0.15);color:var(--red);{% else %}background:rgba(77,171,247,0.15);color:var(--blue);{% endif %}">{{inv.get('sub_status') or 'pending'}}</span>
         </div>
       </div>
       {% endif %}
@@ -2270,20 +2285,23 @@ LOGIN_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Automate Pro — Login</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #0a0a0f;
-    color: #e0e0e0;
+    font-family: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0F172A;
+    color: #F8FAFC;
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
   }
   .login-card {
-    background: #12121a;
-    border: 1px solid #2a2a3a;
+    background: #1E293B;
+    border: 1px solid rgba(255,255,255,0.08);
     border-radius: 16px;
     padding: 48px 40px;
     width: 100%;
@@ -2291,41 +2309,48 @@ LOGIN_HTML = """<!DOCTYPE html>
     text-align: center;
   }
   .login-card h1 { font-size: 24px; margin-bottom: 4px; color: #fff; }
-  .login-card .subtitle { color: #888; font-size: 14px; margin-bottom: 32px; }
-  .login-card .brand { color: #ff8c42; font-weight: 700; font-size: 28px; margin-bottom: 8px; }
+  .login-card .subtitle { color: #94A3B8; font-size: 14px; margin-bottom: 32px; }
+  .login-card .brand { color: #F59E0B; font-weight: 700; font-size: 28px; margin-bottom: 8px; }
+  .login-card .lock-icon { margin-bottom: 12px; color: #F59E0B; }
   .login-card input {
     width: 100%;
     padding: 14px 16px;
     border-radius: 10px;
-    border: 1px solid #2a2a3a;
-    background: #1a1a26;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: #0F172A;
     color: #fff;
     font-size: 16px;
     outline: none;
     transition: border-color 0.2s;
     margin-bottom: 16px;
+    font-family: inherit;
   }
-  .login-card input:focus { border-color: #ff8c42; }
-  .login-card input::placeholder { color: #666; }
+  .login-card input:focus { border-color: #F59E0B; }
+  .login-card input::placeholder { color: #64748B; }
   .login-card button {
     width: 100%;
     padding: 14px;
     border: none;
     border-radius: 10px;
-    background: #ff8c42;
-    color: #fff;
+    background: #F59E0B;
+    color: #0F172A;
     font-size: 16px;
     font-weight: 600;
     cursor: pointer;
     transition: background 0.2s;
+    font-family: inherit;
   }
-  .login-card button:hover { background: #e07a30; }
-  .login-card .error { color: #ff4d4d; font-size: 14px; margin-top: 12px; display: none; }
+  .login-card button:hover { background: #D97706; }
+  .login-card .error { color: #EF4444; font-size: 14px; margin-top: 12px; display: none; }
 </style>
 </head>
 <body>
 <div class="login-card">
-  <div class="brand">Automate Pro</div>
+  <div class="lock-icon">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+  </div>
   <h1>Admin Dashboard</h1>
   <p class="subtitle">Enter your password to continue</p>
   <input type="password" id="password" placeholder="Password" autocomplete="current-password">
@@ -2360,32 +2385,33 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <title>Automate Pro — Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
-    --bg: #0a0a0f;
-    --surface: #12121a;
-    --surface-2: #1a1a26;
-    --border: #2a2a3a;
-    --text: #e0e0e0;
-    --text-muted: #888;
-    --accent: #ff8c42;
-    --accent-hover: #e07a30;
-    --green: #00d4aa;
-    --green-dim: #009977;
-    --red: #ff4d6a;
-    --pink: #ff6b9d;
-    --blue: #4dabf7;
-    --yellow: #ffd43b;
+    --bg: #0F172A;
+    --surface: #1E293B;
+    --surface-2: #334155;
+    --border: rgba(255,255,255,0.08);
+    --text: #F8FAFC;
+    --text-muted: #94A3B8;
+    --accent: #F59E0B;
+    --accent-hover: #D97706;
+    --green: #22C55E;
+    --green-dim: #16A34A;
+    --red: #EF4444;
+    --pink: #EC4899;
+    --blue: #3B82F6;
+    --yellow: #EAB308;
   }
   html, body { height: 100%; }
   body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
     display: flex;
   }
+  .mono { font-family: 'Fira Code', 'Courier New', monospace; }
 
   /* ── Sidebar ── */
   .sidebar {
@@ -2411,7 +2437,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .sidebar nav a {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     padding: 12px 20px;
     color: var(--text-muted);
     text-decoration: none;
@@ -2420,6 +2446,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     transition: all 0.15s;
     border-left: 3px solid transparent;
   }
+  .sidebar nav a svg { flex-shrink: 0; }
   .sidebar nav a:hover, .sidebar nav a.active {
     color: var(--text);
     background: rgba(255,255,255,0.04);
@@ -2440,11 +2467,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
   }
+  .sidebar .logout-btn svg { flex-shrink: 0; }
   .sidebar .logout-btn:hover {
     color: var(--red);
     border-color: var(--red);
-    background: rgba(255,77,106,0.08);
+    background: rgba(239,68,68,0.08);
   }
 
   /* ── Main content ── */
@@ -2454,7 +2487,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     overflow-y: auto;
     min-width: 0;
   }
-  .main h2 { font-size: 28px; font-weight: 700; margin-bottom: 24px; color: #fff; }
+  .main h2 { font-size: 28px; font-weight: 700; margin-bottom: 24px; color: #fff; display: flex; align-items: center; gap: 10px; }
+  .main h2 svg { flex-shrink: 0; }
   .section-title {
     font-size: 18px;
     font-weight: 600;
@@ -2491,7 +2525,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .source-toggle .toggle-btn:hover { color: var(--text); background: var(--surface-2); }
   .source-toggle .toggle-btn.active {
     color: var(--accent);
-    background: rgba(255,140,66,0.1);
+    background: rgba(245,158,11,0.12);
     font-weight: 600;
   }
 
@@ -2509,7 +2543,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     padding: 20px 24px;
   }
   .stat-card .label { font-size: 13px; color: var(--text-muted); font-weight: 500; margin-bottom: 6px; }
-  .stat-card .value { font-size: 32px; font-weight: 700; color: #fff; }
+  .stat-card .value { font-size: 32px; font-weight: 700; color: #fff; font-family: 'Fira Code', 'Courier New', monospace; }
   .stat-card.accent .value { color: var(--accent); }
   .stat-card.green .value { color: var(--green); }
   .stat-card.blue .value { color: var(--blue); }
@@ -2545,6 +2579,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     padding: 2px 8px;
     border-radius: 6px;
     font-size: 12px;
+    font-family: 'Fira Code', 'Courier New', monospace;
   }
   .kanban-col .lead-card {
     background: var(--surface-2);
@@ -2579,10 +2614,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     font-size: 11px;
     font-weight: 600;
     color: var(--accent);
-    background: rgba(255,140,66,0.1);
+    background: rgba(245,158,11,0.12);
     padding: 2px 8px;
     border-radius: 4px;
     margin-top: 4px;
+    font-family: 'Fira Code', 'Courier New', monospace;
   }
   .kanban-col.empty .col-header { opacity: 0.5; }
   .kanban-col.empty .empty-msg {
@@ -2593,7 +2629,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     opacity: 0.4;
   }
 
-  /* Colored dots for columns */
   /* Pipeline column colors */
   .kanban-col[data-status="new"] { border-top: 3px solid var(--blue); }
   .kanban-col[data-status="call_scheduled"] { border-top: 3px solid var(--yellow); }
@@ -2601,7 +2636,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .kanban-col[data-status="building"] { border-top: 3px solid var(--pink); }
   .kanban-col[data-status="demo_ready"] { border-top: 3px solid var(--green-dim); }
   .kanban-col[data-status="delivered"] { border-top: 3px solid var(--green); }
-  .kanban-col[data-status="paid"] { border-top: 3px solid #00e6b8; }
+  .kanban-col[data-status="paid"] { border-top: 3px solid #22C55E; }
 
   /* ── Modal ── */
   .modal-overlay {
@@ -2633,10 +2668,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     background: none;
     border: none;
     color: var(--text-muted);
-    font-size: 24px;
     cursor: pointer;
-    padding: 4px 8px;
+    padding: 4px;
     border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   .modal .close-btn:hover { background: var(--surface-2); color: #fff; }
   .modal h3 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 4px; }
@@ -2661,11 +2698,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   }
   .badge-new { background: rgba(77,171,247,0.15); color: var(--blue); }
   .badge-call_scheduled { background: rgba(255,212,59,0.15); color: var(--yellow); }
-  .badge-call_done { background: rgba(255,140,66,0.15); color: var(--accent); }
+  .badge-call_done { background: rgba(245,158,11,0.15); color: var(--accent); }
   .badge-building { background: rgba(255,107,157,0.15); color: var(--pink); }
   .badge-demo_ready { background: rgba(0,153,119,0.2); color: var(--green-dim); }
-  .badge-delivered { background: rgba(0,212,170,0.15); color: var(--green); }
-  .badge-paid { background: rgba(0,230,184,0.15); color: #00e6b8; }
+  .badge-delivered { background: rgba(34,197,94,0.15); color: var(--green); }
+  .badge-paid { background: rgba(34,197,94,0.15); color: #22C55E; }
 
   .modal .form-group { margin-bottom: 16px; }
   .modal .form-group label {
@@ -2710,7 +2747,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     cursor: pointer;
     transition: all 0.15s;
     font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
+  .btn svg { flex-shrink: 0; }
   .btn-accent { background: var(--accent); color: #fff; }
   .btn-accent:hover { background: var(--accent-hover); }
   .btn-green { background: var(--green-dim); color: #fff; }
@@ -2737,8 +2778,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     border-radius: 6px;
     display: none;
   }
-  .email-result.success { display: block !important; background: rgba(0,212,170,0.1); color: var(--green); }
-  .email-result.error { display: block !important; background: rgba(255,77,106,0.1); color: var(--red); }
+  .email-result.success { display: block !important; background: rgba(34,197,94,0.1); color: var(--green); }
+  .email-result.error { display: block !important; background: rgba(239,68,68,0.1); color: var(--red); }
 
   /* ── Revenue section ── */
   .revenue-grid {
@@ -2753,7 +2794,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     padding: 20px 24px;
   }
   .revenue-card .label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
-  .revenue-card .amount { font-size: 28px; font-weight: 700; color: var(--green); }
+  .revenue-card .amount { font-size: 28px; font-weight: 700; color: var(--green); font-family: 'Fira Code', 'Courier New', monospace; }
 
   /* ── Responsive ── */
   @media (max-width: 768px) {
@@ -2787,7 +2828,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     z-index: 2000;
     animation: slideIn 0.3s ease;
     display: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
+  .toast svg { flex-shrink: 0; }
   /* ── Table card ── */
   .table-card {
     background: var(--surface);
@@ -2833,7 +2878,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     cursor: pointer;
     transition: all 0.15s;
     font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
   }
+  .data-table .actions button svg { flex-shrink: 0; }
   .data-table .actions button:hover { border-color: var(--accent); color: var(--accent); }
   .data-table .actions button.send:hover { border-color: var(--blue); color: var(--blue); }
   .data-table .actions button.pay:hover { border-color: var(--green); color: var(--green); }
@@ -2850,35 +2899,90 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   }
   .inv-badge.draft { background: rgba(136,136,136,0.15); color: var(--text-muted); }
   .inv-badge.sent { background: rgba(77,171,247,0.15); color: var(--blue); }
-  .inv-badge.paid { background: rgba(0,212,170,0.15); color: var(--green); }
+  .inv-badge.paid { background: rgba(34,197,94,0.15); color: var(--green); }
   .inv-badge.overdue { background: rgba(255,77,106,0.15); color: var(--red); }
   .inv-badge.cancelled { background: rgba(136,136,136,0.15); color: var(--text-muted); }
 
-  .toast.show { display: block; }
-  .toast.success { background: rgba(0,212,170,0.15); border: 1px solid var(--green); color: var(--green); }
-  .toast.error { background: rgba(255,77,106,0.15); border: 1px solid var(--red); color: var(--red); }
+  .toast.show { display: flex; }
+  .toast.success { background: rgba(34,197,94,0.12); border: 1px solid var(--green); color: var(--green); }
+  .toast.error { background: rgba(239,68,68,0.12); border: 1px solid var(--red); color: var(--red); }
   @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  /* SVG icon sizing */
+  .icon { width: 18px; height: 18px; }
+  .icon-sm { width: 14px; height: 14px; }
+  .icon-inline { display: inline-block; vertical-align: middle; position: relative; top: -1px; }
 </style>
 </head>
 <body>
+
+<!-- Hidden SVG sprite -->
+<svg style="display:none" aria-hidden="true">
+  <defs>
+    <g id="ic-dashboard"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></g>
+    <g id="ic-file"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></g>
+    <g id="ic-dollar"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></g>
+    <g id="ic-columns"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></g>
+    <g id="ic-logout"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></g>
+    <g id="ic-x"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></g>
+    <g id="ic-briefcase"><rect x="2" y="7" width="20" height="13" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></g>
+    <g id="ic-refresh"><polyline points="21 2 21 8 15 8"/><polyline points="3 22 3 16 9 16"/><path d="M21 12A9 9 0 0 0 5.64 5.64L3 8"/><path d="M3 12a9 9 0 0 0 15.36 6.36L21 16"/></g>
+    <g id="ic-clipboard"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></g>
+    <g id="ic-settings"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></g>
+    <g id="ic-sparkles"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></g>
+    <g id="ic-calendar"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></g>
+    <g id="ic-check-circle"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></g>
+    <g id="ic-wrench"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></g>
+    <g id="ic-play-circle"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></g>
+    <g id="ic-package"><path d="m16 16 2 2 4-4"/><path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" y1="22" x2="12" y2="12"/></g>
+    <g id="ic-dollar-circle"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><line x1="12" y1="6" x2="12" y2="18"/></g>
+    <g id="ic-rocket"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></g>
+    <g id="ic-bot"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 5V3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><line x1="8" y1="13" x2="8" y2="13"/><line x1="12" y1="13" x2="12" y2="13"/><line x1="16" y1="13" x2="16" y2="13"/></g>
+    <g id="ic-file-plus"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></g>
+    <g id="ic-link"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></g>
+    <g id="ic-clipboard-copy"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><rect x="7" y="10" width="10" height="10" rx="2"/></g>
+    <g id="ic-mail"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 4-10 8L2 4"/></g>
+    <g id="ic-eye"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></g>
+    <g id="ic-ban"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 14.14 14.14"/></g>
+    <g id="ic-circle"><circle cx="12" cy="12" r="10"/></g>
+  </defs>
+</svg>
 
 <!-- Sidebar -->
 <div class="sidebar">
   <div class="brand">Automate Pro</div>
   <nav>
-    <a href="#" class="active" onclick="switchTab('dashboard'); return false;">📊 Dashboard</a>
-    <a href="#" onclick="switchTab('invoices'); return false;">📄 Invoices</a>
-    <a href="#" onclick="switchTab('revenue'); return false;">💰 Revenue</a>
-    <a href="#" onclick="switchTab('pipeline'); return false;">📋 Pipeline</a>
+    <a href="#" class="active" onclick="switchTab('dashboard'); return false;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-dashboard"/></svg>
+      Dashboard
+    </a>
+    <a href="#" onclick="switchTab('invoices'); return false;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-file"/></svg>
+      Invoices
+    </a>
+    <a href="#" onclick="switchTab('revenue'); return false;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-dollar"/></svg>
+      Revenue
+    </a>
+    <a href="#" onclick="switchTab('pipeline'); return false;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-columns"/></svg>
+      Pipeline
+    </a>
   </nav>
   <div class="logout-section">
-    <button class="logout-btn" onclick="logout()">🚪 Sign Out</button>
+    <button class="logout-btn" onclick="logout()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-logout"/></svg>
+      Sign Out
+    </button>
   </div>
 </div>
 
 <!-- Main content -->
 <div class="main" id="main-content">
-  <h2>📊 Dashboard</h2>
+  <h2>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-dashboard"/></svg>
+    Dashboard
+  </h2>
   <div class="source-toggle" id="source-toggle">
     <button class="toggle-btn active" data-filter="my" onclick="setSourceFilter('my')">My Leads</button>
     <button class="toggle-btn" data-filter="all" onclick="setSourceFilter('all')">All Clients</button>
@@ -2904,8 +3008,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <!-- ── Invoices Tab ── -->
   <div id="invoices-tab" style="display:none;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
-      <h2 style="margin-bottom:0;">📄 Invoices</h2>
-      <button class="btn btn-accent" onclick="openCreateInvoiceModal()">+ Create Invoice</button>
+      <h2 style="margin-bottom:0;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-file"/></svg>
+        Invoices
+      </h2>
+      <button class="btn btn-accent" onclick="openCreateInvoiceModal()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-file-plus"/></svg>
+        Create Invoice
+      </button>
     </div>
     <div class="table-card">
       <table class="data-table" id="invoices-table">
@@ -2932,12 +3042,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <!-- Create Invoice Modal -->
 <div class="modal-overlay" id="create-invoice-modal">
   <div class="modal">
-    <button class="close-btn" onclick="closeCreateInvoiceModal()">&times;</button>
+    <button class="close-btn" onclick="closeCreateInvoiceModal()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-x"/></svg>
+    </button>
     <h3>Create Invoice</h3>
     <div class="modal-sub">Generate a new invoice for a client</div>
 
     <!-- One-Time Setup Fee -->
-    <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">💼 One-Time Setup Fee</div>
+    <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-briefcase"/></svg>
+      One-Time Setup Fee
+    </div>
     <div class="form-group">
       <label>Client Name</label>
       <input type="text" id="inv-client-name" placeholder="Full name">
@@ -2960,7 +3075,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
 
     <!-- Subscription Toggle -->
-    <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;">🔄 Subscription (Optional)</div>
+    <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;display:flex;align-items:center;gap:6px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-refresh"/></svg>
+      Subscription (Optional)
+    </div>
     <div class="form-group" style="display:flex;align-items:center;gap:10px;">
       <label style="margin-bottom:0;">Add recurring subscription?</label>
       <label class="toggle-switch">
@@ -2993,7 +3111,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     <div class="btn-row" style="margin-bottom:0;">
       <button class="btn btn-accent" onclick="createInvoice()">Generate Invoice</button>
-      <button class="btn btn-green" onclick="createAndSendInvoice()" style="background:#00d4aa;color:#0a0a0f;border:none;padding:10px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Create &amp; Send</button>
+      <button class="btn btn-green" onclick="createAndSendInvoice()" style="background:#22C55E;color:#0F172A;border:none;padding:10px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Create &amp; Send</button>
       <button class="btn btn-outline" onclick="closeCreateInvoiceModal()">Cancel</button>
     </div>
     <div class="email-result" id="create-invoice-result"></div>
@@ -3029,7 +3147,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   transition: 0.2s;
 }
 .toggle-switch input:checked + .toggle-slider {
-  background: rgba(0,212,170,0.2);
+  background: rgba(34,197,94,0.2);
   border-color: var(--green);
 }
 .toggle-switch input:checked + .toggle-slider:before {
@@ -3041,7 +3159,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <!-- Confirm Invoice Modal -->
 <div class="modal-overlay" id="confirm-invoice-modal">
   <div class="modal" style="max-width:420px;">
-    <button class="close-btn" onclick="document.getElementById('confirm-invoice-modal').classList.remove('open')">&times;</button>
+    <button class="close-btn" onclick="document.getElementById('confirm-invoice-modal').classList.remove('open')">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-x"/></svg>
+    </button>
     <h3 id="confirm-title">Confirm</h3>
     <p style="color:#888;font-size:14px;margin:8px 0 24px;" id="confirm-msg"></p>
     <div class="btn-row" style="margin-bottom:0;">
@@ -3054,13 +3174,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <!-- Lead Detail Modal -->
 <div class="modal-overlay" id="modal">
   <div class="modal">
-    <button class="close-btn" onclick="closeModal()">&times;</button>
+    <button class="close-btn" onclick="closeModal()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-x"/></svg>
+    </button>
     <h3 id="modal-name">—</h3>
     <div class="modal-sub" id="modal-email">—</div>
 
     <!-- Section 1: Lead Info (Read-only) -->
     <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);">
-      <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">📋 Lead Info</div>
+      <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-clipboard"/></svg>
+        Lead Info
+      </div>
       <div class="info-grid">
         <div class="info-item"><div class="label">Business Type</div><div class="value" id="modal-biz">—</div></div>
         <div class="info-item"><div class="label">Source</div><div class="value" id="modal-source">—</div></div>
@@ -3073,17 +3198,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     <!-- Section 2: Workflow (Editable) -->
     <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);">
-      <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">⚙️ Workflow</div>
+      <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-settings"/></svg>
+        Workflow
+      </div>
       <div class="form-group">
         <label>Status</label>
         <select id="modal-status-select" onchange="updateLeadStatus()">
-          <option value="new">🆕 New</option>
-          <option value="call_scheduled">📅 Call Scheduled</option>
-          <option value="call_done">✅ Call Done</option>
-          <option value="building">🔧 Building</option>
-          <option value="demo_ready">🎬 Demo Ready</option>
-          <option value="delivered">📦 Delivered</option>
-          <option value="paid">💰 Paid</option>
+          <option value="new">New</option>
+          <option value="call_scheduled">Call Scheduled</option>
+          <option value="call_done">Call Done</option>
+          <option value="building">Building</option>
+          <option value="demo_ready">Demo Ready</option>
+          <option value="delivered">Delivered</option>
+          <option value="paid">Paid</option>
         </select>
       </div>
       <div class="form-group">
@@ -3106,12 +3234,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     <!-- Section 3: Quick Actions -->
     <div style="margin-bottom:16px;">
-      <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">🚀 Quick Actions</div>
+      <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-sparkles"/></svg>
+        Quick Actions
+      </div>
       <div class="btn-row">
-        <button class="btn btn-build btn-sm" onclick="buildNow()" style="background:#00d4aa;color:#0a0a0f;border:none;padding:8px 14px;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">🤖 Build Now</button>
-        <button class="btn btn-green btn-sm" onclick="createInvoiceForLead()">📄 Create Invoice</button>
-        <button class="btn btn-accent btn-sm" onclick="copyCalendlyLink()">🔗 Copy Calendly Link</button>
-        <button class="btn btn-outline btn-sm" onclick="copyRequirementsSummary()">📋 Copy Requirements</button>
+        <button class="btn btn-build btn-sm" onclick="buildNow()" style="background:#22C55E;color:#0F172A;border:none;padding:8px 14px;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-bot"/></svg>
+          Build Now
+        <button class="btn btn-green btn-sm" onclick="createInvoiceForLead()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-file-plus"/></svg>
+          Create Invoice</button>
+        <button class="btn btn-accent btn-sm" onclick="copyCalendlyLink()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-link"/></svg>
+          Copy Calendly Link</button>
+        <button class="btn btn-outline btn-sm" onclick="copyRequirementsSummary()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-clipboard-copy"/></svg>
+          Copy Requirements</button>
       </div>
       <div class="email-section">
         <div class="form-group" style="margin-top:12px;">
@@ -3119,7 +3258,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <input type="text" id="email-subject" placeholder="Subject" style="margin-bottom:8px;">
           <textarea id="email-body" placeholder="Email body..." style="min-height:80px;"></textarea>
         </div>
-        <button class="btn btn-outline btn-sm" onclick="sendEmailToLead()">📧 Send Email</button>
+        <button class="btn btn-outline btn-sm" onclick="sendEmailToLead()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-mail"/></svg>
+          Send Email</button>
         <div class="email-result" id="email-result"></div>
       </div>
     </div>
@@ -3362,7 +3503,7 @@ function buildNow() {
   const price = priceEl ? priceEl.value || 'Not set' : 'Not set';
   const text = 'Client: ' + name + '\\nRequirements: ' + req + '\\nBudget: $' + price;
   navigator.clipboard.writeText(text).then(() => {
-    toast('✅ Copied! Now tell Jarvis: "Build this automation"', 'success');
+    toast('Copied! Now tell Jarvis: "Build this automation"', 'success');
   }).catch(() => {
     prompt('Copy this text and send to Jarvis:', text);
   });
@@ -3371,7 +3512,7 @@ function buildNow() {
 function copyCalendlyLink() {
   const link = 'https://calendly.com/emilio-pegolo1/30min';
   navigator.clipboard.writeText(link).then(() => {
-    toast('📅 Calendly link copied!', 'success');
+    toast('Calendly link copied!', 'success');
   }).catch(() => {
     // Fallback
     const ta = document.createElement('textarea');
@@ -3380,7 +3521,7 @@ function copyCalendlyLink() {
     ta.select();
     document.execCommand('copy');
     document.body.removeChild(ta);
-    toast('📅 Calendly link copied!', 'success');
+    toast('Calendly link copied!', 'success');
   });
 }
 
@@ -3392,7 +3533,7 @@ function copyRequirementsSummary() {
   const price = $('modal-quoted-price').value || 'Not quoted';
   const summary = `Client: ${name}\nBusiness: ${biz}\nRequirements: ${req}\nQuoted Price: $${price}\n---\nGenerated by Automate Pro`;
   navigator.clipboard.writeText(summary).then(() => {
-    toast('📋 Requirements summary copied!', 'success');
+    toast('Requirements summary copied!', 'success');
   }).catch(() => {
     const ta = document.createElement('textarea');
     ta.value = summary;
@@ -3400,7 +3541,7 @@ function copyRequirementsSummary() {
     ta.select();
     document.execCommand('copy');
     document.body.removeChild(ta);
-    toast('📋 Requirements summary copied!', 'success');
+    toast('Requirements summary copied!', 'success');
   });
 }
 
@@ -3427,11 +3568,11 @@ async function sendEmailToLead() {
   });
 
   if (res && res.success) {
-    resultDiv.textContent = '✅ ' + res.message;
+    resultDiv.textContent = res.message;
     resultDiv.className = 'email-result success';
     toast('Email sent!', 'success');
   } else {
-    resultDiv.textContent = '❌ ' + (res ? res.error : 'Failed to send');
+    resultDiv.textContent = (res ? res.error : 'Failed to send');
     resultDiv.className = 'email-result error';
   }
 }
@@ -3457,7 +3598,7 @@ async function loadInvoices() {
     const leadAttr = inv.lead_id ? `data-lead="${inv.lead_id}"` : '';
     const hasSub = inv.has_subscription;
     const subInfo = hasSub ? `$${Number(inv.sub_amount||0).toLocaleString('en-AU',{minimumFractionDigits:2})}/${inv.sub_interval||'month'}` : '—';
-    const subBadge = hasSub ? (inv.sub_status === 'active' ? '<span style="color:var(--green);font-size:11px;">🟢 active</span>' : inv.sub_status === 'cancelled' ? '<span style="color:var(--red);font-size:11px;">🔴 cancelled</span>' : '<span style="color:var(--blue);font-size:11px;">⏳ pending</span>') : '';
+    const subBadge = hasSub ? (inv.sub_status === 'active' ? '<span style="color:var(--green);font-size:11px;">active</span>' : inv.sub_status === 'cancelled' ? '<span style="color:var(--red);font-size:11px;">cancelled</span>' : '<span style="color:var(--blue);font-size:11px;">pending</span>') : '';
     return `<tr ${leadAttr}>
       <td style="font-weight:600;color:#fff;">${escapeHtml(inv.invoice_number)}</td>
       <td>
@@ -3473,10 +3614,10 @@ async function loadInvoices() {
       <td style="color:#888;font-size:13px;">${dateStr}</td>
       <td>
         <div class="actions">
-          <button class="view-btn" onclick="window.open('/invoice/${inv.id}','_blank')">👁️ View</button>
-          ${statusClass !== 'paid' && statusClass !== 'cancelled' ? `<button class="send" onclick="sendInvoice('${inv.id}')">📧 Send</button>` : ''}
-          ${statusClass === 'sent' ? `<button class="pay" onclick="markInvoicePaid('${inv.id}')">✅ Paid</button>` : ''}
-          ${hasSub && inv.sub_status === 'active' ? `<button class="cancel-sub" onclick="cancelSubscription('${inv.id}')" style="color:var(--red);border-color:var(--red);">🚫 Cancel Sub</button>` : ''}
+          <button class="view-btn" onclick="window.open('/invoice/${inv.id}','_blank')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-eye"/></svg> View</button>
+          ${statusClass !== 'paid' && statusClass !== 'cancelled' ? `<button class="send" onclick="sendInvoice('${inv.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-mail"/></svg> Send</button>` : ''}
+          ${statusClass === 'sent' ? `<button class="pay" onclick="markInvoicePaid('${inv.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-check-circle"/></svg> Paid</button>` : ''}
+          ${hasSub && inv.sub_status === 'active' ? `<button class="cancel-sub" onclick="cancelSubscription('${inv.id}')" style="color:var(--red);border-color:var(--red);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-ban"/></svg> Cancel Sub</button>` : ''}
         </div>
       </td>
     </tr>`;
@@ -3486,10 +3627,10 @@ async function loadInvoices() {
 async function sendInvoice(id) {
   const res = await fetchJSON('/api/invoices/' + id + '/send', { method: 'POST' });
   if (res && res.success) {
-    toast('✅ ' + res.message, 'success');
+    toast(res.message, 'success');
     loadInvoices();
   } else {
-    toast('❌ ' + (res ? res.error : 'Failed to send'), 'error');
+    toast((res ? res.error : 'Failed to send'), 'error');
   }
 }
 
@@ -3500,10 +3641,10 @@ async function markInvoicePaid(id) {
     body: JSON.stringify({ status: 'paid' })
   });
   if (res) {
-    toast('✅ Invoice marked as paid', 'success');
+    toast('Invoice marked as paid', 'success');
     loadInvoices();
   } else {
-    toast('❌ Failed to update invoice', 'error');
+    toast('Failed to update invoice', 'error');
   }
 }
 
@@ -3511,10 +3652,10 @@ async function cancelSubscription(id) {
   if (!confirm(`Are you sure you want to cancel this subscription?\n\nThis will:\n- Cancel the recurring billing in Stripe\n- Email Emilio to take down the client's website\n- Mark the subscription as cancelled`)) return;
   const res = await fetchJSON('/api/invoices/' + id + '/cancel-subscription', { method: 'POST' });
   if (res && res.success) {
-    toast('✅ ' + res.message, 'success');
+    toast(res.message, 'success');
     loadInvoices();
   } else {
-    toast('❌ ' + (res ? res.error : 'Failed to cancel subscription'), 'error');
+    toast((res ? res.error : 'Failed to cancel subscription'), 'error');
   }
 }
 
@@ -3608,13 +3749,13 @@ async function createInvoice() {
   });
 
   if (res && !res.error) {
-    resultDiv.textContent = '✅ Invoice ' + (res.invoice_number || '') + ' created!';
+    resultDiv.textContent = 'Invoice ' + (res.invoice_number || '') + ' created!';
     resultDiv.className = 'email-result success';
     toast('Invoice ' + (res.invoice_number || '') + ' created!', 'success');
     closeCreateInvoiceModal();
     loadInvoices();
   } else {
-    resultDiv.textContent = '❌ ' + (res ? res.error : 'Failed to create invoice');
+    resultDiv.textContent = (res ? res.error : 'Failed to create invoice');
     resultDiv.className = 'email-result error';
   }
 }
@@ -3640,22 +3781,22 @@ async function createAndSendInvoice() {
   };
   const res = await fetchJSON('/api/invoices', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
   if (res && !res.error) {
-    resultDiv.textContent = '✅ Invoice created! Now sending...';
+    resultDiv.textContent = 'Invoice created! Now sending...';
     const sendResult = await fetchJSON('/api/invoices/' + res.id + '/send', { method:'POST' });
     if (sendResult && sendResult.success) {
-      resultDiv.textContent = '✅ Invoice sent! ' + (hasSub ? 'Setup + subscription links sent!' : 'Stripe payment link sent!');
+      resultDiv.textContent = 'Invoice sent! ' + (hasSub ? 'Setup + subscription links sent!' : 'Stripe payment link sent!');
       resultDiv.className = 'email-result success';
       toast('Invoice created and sent!', 'success');
       closeCreateInvoiceModal();
       loadInvoices();
     } else {
-      resultDiv.textContent = '✅ Invoice created but send failed: ' + (sendResult ? sendResult.error : 'Unknown');
+      resultDiv.textContent = 'Invoice created but send failed: ' + (sendResult ? sendResult.error : 'Unknown');
       resultDiv.className = 'email-result error';
       closeCreateInvoiceModal();
       loadInvoices();
     }
   } else {
-    resultDiv.textContent = '❌ ' + (res ? res.error : 'Failed');
+    resultDiv.textContent = (res ? res.error : 'Failed');
     resultDiv.className = 'email-result error';
   }
 }
@@ -3672,7 +3813,7 @@ function switchTab(tab) {
   $('main-content').querySelector('h2').style.display = 'block';
 
   if (tab === 'dashboard') {
-    $('main-content').querySelector('h2').textContent = '📊 Dashboard';
+    $('main-content').querySelector('h2').textContent = 'Dashboard';
     $('stats-grid').style.display = 'grid';
     document.querySelector('.section-title').textContent = 'Pipeline';
     document.querySelector('.section-title').style.display = 'block';
@@ -3681,7 +3822,7 @@ function switchTab(tab) {
     $('revenue-grid').style.display = 'none';
     loadDashboard();
   } else if (tab === 'revenue') {
-    $('main-content').querySelector('h2').textContent = '💰 Revenue';
+    $('main-content').querySelector('h2').textContent = 'Revenue';
     $('stats-grid').style.display = 'none';
     document.querySelector('.section-title').style.display = 'none';
     $('kanban').style.display = 'none';
@@ -3698,7 +3839,7 @@ function switchTab(tab) {
     $('invoices-tab').style.display = 'block';
     loadInvoices();
   } else if (tab === 'pipeline') {
-    $('main-content').querySelector('h2').textContent = '📋 Pipeline';
+    $('main-content').querySelector('h2').textContent = 'Pipeline';
     $('main-content').querySelector('h2').style.display = 'block';
     $('invoices-tab').style.display = 'none';
     $('stats-grid').style.display = 'none';
@@ -3879,7 +4020,7 @@ PLUMBER_HTML = """<!DOCTYPE html>
     position: absolute;
     inset: 0;
     background: radial-gradient(ellipse at 50% 0%, rgba(255,140,66,0.08) 0%, transparent 60%),
-                radial-gradient(ellipse at 80% 20%, rgba(0,212,170,0.04) 0%, transparent 50%);
+                radial-gradient(ellipse at 80% 20%, rgba(34,197,94,0.04) 0%, transparent 50%);
     pointer-events: none;
   }
   .hero-content { position: relative; z-index: 1; max-width: 800px; }
@@ -4030,7 +4171,7 @@ PLUMBER_HTML = """<!DOCTYPE html>
     margin-top: 12px;
     padding: 4px 12px;
     border-radius: 6px;
-    background: rgba(0,212,170,0.12);
+    background: rgba(34,197,94,0.12);
     color: var(--green);
     font-size: 12px;
     font-weight: 600;
@@ -4200,13 +4341,13 @@ PLUMBER_HTML = """<!DOCTYPE html>
   }
   .form-result.success {
     display: block;
-    background: rgba(0,212,170,0.12);
-    border: 1px solid rgba(0,212,170,0.3);
+    background: rgba(34,197,94,0.12);
+    border: 1px solid rgba(34,197,94,0.3);
     color: var(--green);
   }
   .form-result.error {
     display: block;
-    background: rgba(255,77,106,0.12);
+    background: rgba(239,68,68,0.12);
     border: 1px solid rgba(255,77,106,0.3);
     color: #ff4d6a;
   }
