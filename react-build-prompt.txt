@@ -1,0 +1,54 @@
+MISSION: Build a 5-figure quality professional website for Automate Pro
+
+You have two design skills you MUST reference:
+
+SKILL 1: UI/UX Pro Max (design system)
+Location: /Users/emiliopegolo/mamaorbit/.claude/skills/ui-ux-pro-max/
+Read SKILL.md first, then generate design system:
+  python3 /Users/emiliopegolo/mamaorbit/.claude/skills/ui-ux-pro-max/scripts/search.py "automation agency saas dashboard dark" --design-system
+
+SKILL 2: Motion/Framer Motion (animations)
+Location: /Users/emiliopegolo/.claude/skills/motion-framer/SKILL.md
+Read it for Framer Motion patterns.
+
+PROJECT SPEC: /Users/emiliopegolo/automate-pro/full-website-spec.md
+
+WHAT TO BUILD:
+Create a Vite + React project at /Users/emiliopegolo/automate-pro-react/
+
+Pages:
+1. Landing page (/) — Hero, services, how it works, testimonials, CTA
+2. Services page (/services) — Detailed pricing/plans
+3. About page (/about) — Stats, company approach
+4. Contact page (/contact) — Form that POSTs to /api/lead on Flask backend
+
+Every page uses:
+- Framer Motion: staggerChildren, whileInView, whileHover, whileTap, AnimatePresence, spring physics, layout animations
+- lucide-react icons (no emoji anywhere)
+- Fira Sans + Fira Code fonts from Google Fonts
+- Deep navy #0F172A + gold #F59E0B palette
+- Tailwind CSS v4
+
+AI Agent:
+- Floating chat button (bottom-right), pulsing glow animation
+- Slide-out panel with AnimatePresence entrance/exit
+- Sends to /api/chat on Flask backend
+- Typing indicator with bouncing dots
+- Message animations with variant propagation
+
+DEPLOYMENT:
+Build output goes to automate-pro-react/dist/.
+Flask will serve static files from dist.
+
+VERIFICATION:
+npm run build must succeed.
+All pages must render and animate.
+Contact form must POST to /api/lead.
+AI chat widget must be functional.
+
+STEPS:
+1. cd /Users/emiliopegolo/automate-pro-react && npm create vite@latest . -- --template react
+2. npm install react-router-dom framer-motion lucide-react tailwindcss @tailwindcss/vite
+3. Read the skills and design system
+4. Build all pages with proper animations
+5. npm run build (must succeed)

@@ -1,0 +1,156 @@
+# Automate Pro — React Site Build
+
+## SKILLS TO USE (MUST READ BOTH)
+1. /Users/emiliopegolo/.claude/skills/motion-framer/SKILL.md — Use Framer Motion patterns throughout
+2. /Users/emiliopegolo/mamaorbit/.claude/skills/ui-ux-pro-max/SKILL.md — Design system reference
+
+## IMPORTANT - CONTENT ACCURACY
+The following content is EXACT. Do not change any pricing, features, or copy.
+
+## LANDING PAGE (/)
+
+### Hero Section
+- Badge: "AI Automation for Local Businesses"  
+- Heading: "Automate Your Business." span with gradient text: "Save Hours Every Day."
+- Subtext: "AI-powered workflows that handle your leads, bookings, invoices, and follow-ups — so you can focus on the work that pays."
+- Two CTAs: "Book a Free Strategy Call" (primary) + "View Services" (outline)
+- Animated background with subtle particle/dot pattern
+
+### Problem/Solution Section ("The Problem" / "The Solution")
+- Problem card: "You're losing time to repetitive tasks — responding to the same emails, chasing invoices, manually entering data."
+- Solution checklist:
+  - "Lead capture → auto-reply → CRM entry in seconds"
+  - "Invoice reminders sent automatically"
+  - "Appointment booking without back-and-forth"
+  - "Daily reports delivered to your phone"
+
+### Services Section
+- Label: "Services"
+- Heading: "Automation packages built for results"
+- EXACT PRICING (DO NOT CHANGE):
+
+Plan 1: Starter
+- Setup: $497 / Monthly: $197/mo
+- Features:
+  - 2 custom automations
+  - Lead capture workflow
+  - Email auto-responder
+  - Monthly optimization
+
+Plan 2: Growth (FEATURED - highlight this one)
+- Setup: $997 / Monthly: $497/mo
+- Features:
+  - 5 custom automations
+  - Lead → CRM → Follow-up pipeline
+  - Invoice automation
+  - SMS notifications
+  - Weekly performance reports
+
+Plan 3: Scale
+- Setup: $1,997 / Monthly: $997/mo
+- Features:
+  - Unlimited automations
+  - Full business system integration
+  - Custom dashboard
+  - Priority support
+  - Same-day response
+
+### How It Works Section
+- Label: "How It Works"
+- Heading: "From first call to fully automated in under a week"
+- 4 Steps:
+  1. Discovery Call — "30 min — we map your workflow and identify automation opportunities."
+  2. Build — "3–5 days — I build the automations to your exact specifications."
+  3. Deploy — "Goes live in your business — no training needed, it just works."
+  4. Optimize — "Monthly tweaks as you grow, keeping your systems running smooth."
+
+### Testimonial Section
+- Quote: "Since implementing Automate Pro's workflows, we've cut admin time by 60%."
+- Author: "— Michael Torres, Torres Real Estate Group"
+
+### Contact Section
+- Label: "Contact"
+- Heading: "Let's automate your business"
+- Text: "Fill out the form and I'll get back to you within 24 hours to schedule your free strategy call. No commitment, no pitch — just a conversation about what we can automate."
+- Email: "emilio@automatepro.ai"
+- Contact form fields (POST to /api/lead):
+  - Name (required, placeholder: "Your full name")
+  - Email (required, placeholder: "you@company.com")
+  - Phone Number (placeholder: "04XX XXX XXX")
+  - Business Type (required, select dropdown): Trades & Construction, Real Estate, Gym/Fitness, E-commerce, Other
+  - Message (textarea, placeholder: "Tell me about your business and what you'd like to automate...")
+  - Submit button: "Send Message" with spinner on loading
+
+### Footer
+- Tagline: "Built with AI. Powered by results."
+- Legal: "Automate Pro — AI Automation Agency"
+
+## SERVICES PAGE (/services)
+Same pricing plans as above but in an expanded table/compare layout with detailed feature breakdowns.
+
+## ABOUT PAGE (/about)
+Company approach and values. Key stats displayed with animated counters.
+
+## CONTACT PAGE (/contact)
+Same contact form as landing page but standalone with more space.
+
+## GLOBAL COMPONENTS
+
+### Navbar
+- Logo: "Automate" + "Pro" (accent color)
+- Links: Services, About, Contact
+- "Get Started" CTA button
+- Sticky/fixed, backdrop-blur on scroll
+- Mobile hamburger menu with animated open/close
+
+### AI Chat Agent (bottom-right)
+- Floating button with pulsing glow animation
+- Click opens slide-out panel (AnimatePresence)
+- Sends POST to /api/chat with { message: "..." }
+- Receives { reply: "..." } and displays
+- Typing indicator with bouncing dots animation
+- Message bubbles animate in with stagger
+
+### Footer
+- "Automate" + "Pro" logo
+- "Built with AI. Powered by results."
+- "Automate Pro — AI Automation Agency"
+- Social/legal links
+
+## DESIGN SYSTEM (apply from ui-ux-pro-max)
+- Colors: bg #0F172A, surface #1E293B, surface-2 #334155, accent #F59E0B, accent-hover #D97706, green #22C55E, red #EF4444, blue #3B82F6, text #F8FAFC, muted #94A3B8
+- Fonts: Fira Sans (body) + Fira Code (mono/data)
+- Icons: lucide-react everywhere, NO emoji
+- Tailwind CSS v4 with @theme custom tokens
+
+## ANIMATIONS (from motion-framer skill)
+- Page transitions with AnimatePresence (fade+slide)
+- Hero section: staggerChildren 0.12s with spring physics
+- Scroll reveals: whileInView on all sections
+- Service cards: whileHover scale + border transition, whileTap press
+- Steps: staggered scroll reveal
+- Navbar: layoutId for active indicator
+- Form errors: shake animation with AnimatePresence
+- AI chat: AnimatePresence for panel open/close, message animations
+- Counters on About page: useSpring or AnimatePresence
+
+## TECH SETUP
+- Already created: /Users/emiliopegolo/automate-pro-react/
+- Already installed: react-router-dom, framer-motion, lucide-react, tailwindcss, @tailwindcss/vite
+- npm run build must succeed
+- Build output must be complete
+
+## BUILD ORDER
+1. Write src/main.jsx with React Router setup
+2. Write src/index.css with Tailwind + custom tokens
+3. Write src/components/Navbar.jsx
+4. Write src/components/Footer.jsx
+5. Write src/components/PageTransition.jsx
+6. Write src/components/AIAgent.jsx
+7. Write src/components/TestimonialCarousel.jsx
+8. Write src/pages/Landing.jsx (biggest page — all sections above)
+9. Write src/pages/Services.jsx
+10. Write src/pages/About.jsx
+11. Write src/pages/Contact.jsx
+12. Write src/App.jsx with routes
+13. Run npm run build
