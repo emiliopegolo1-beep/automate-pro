@@ -396,10 +396,91 @@ def login_required(f):
 
 
 
+# ── React SPA (new site) ──────────────────────────────────────────────────────
+
 @app.route("/")
 def serve_index():
-    with open(os.path.join(os.path.dirname(__file__), "index.html"), "r") as f:
-        return f.read()
+    return serve_react("index.html")
+
+@app.route("/services")
+def serve_services():
+    return serve_react("index.html")
+
+@app.route("/about")
+def serve_about():
+    return serve_react("index.html")
+
+@app.route("/contact")
+def serve_contact():
+    return serve_react("index.html")
+
+@app.route("/react-assets/<path:filename>")
+def serve_react_assets(filename):
+    return serve_react("assets/" + filename)
+
+@app.route("/favicon.svg")
+def serve_react_favicon():
+    return serve_react("favicon.svg")
+
+@app.route("/icons.svg")
+def serve_react_icons():
+    return serve_react("icons.svg")
+
+REACT_DIST = os.path.join(os.path.dirname(__file__), "react-dist")
+
+def serve_react(path):
+    full = os.path.join(REACT_DIST, path)
+    if os.path.isfile(full):
+        with open(full, "r") as f:
+            return f.read()
+    return "File not found", 404
+
+
+# ── AI Chat (DeepSeek) ──────────────────────────────────────────────────────────
+
+import urllib.request
+import json
+
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    data = request.get_json(silent=True)
+    if not data or "message" not in data:
+        return jsonify({"error": "Message required"}), 400
+
+    user_msg = data["message"][:2000]
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+
+    if not api_key:
+        return jsonify({"reply": "AI chat is not configured yet. Drop us a message and we'll get back to you!"})
+
+    try:
+        body = json.dumps({
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "You are Automate Pro's AI assistant. You help local business owners understand how AI automation can save them time. Be helpful, concise, and friendly. Your goal is to answer questions about services and schedule a strategy call."},
+                {"role": "user", "content": user_msg}
+            ],
+            "max_tokens": 500,
+            "temperature": 0.7
+        }).encode()
+
+        req = urllib.request.Request(
+            "https://api.deepseek.com/v1/chat/completions",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+            reply = result["choices"][0]["message"]["content"]
+            return jsonify({"reply": reply})
+
+    except Exception as e:
+        return jsonify({"reply": "Sorry, I'm having trouble connecting. Please email us at hello@automatepro.ai!"})
+
 
 @app.route("/api/lead", methods=["POST"])
 def api_lead():
