@@ -436,15 +436,7 @@ def serve_react(path):
     return "File not found", 404
 
 
-# ── React SPA catch-all (for any route not matched above) ──────────────────
 
-@app.route("/<path:fallback_path>")
-def serve_react_fallback(fallback_path):
-    # Don't catch API routes, dashboard, or other existing routes
-    if fallback_path.startswith("api/") or fallback_path.startswith("portal/") or \
-       fallback_path.startswith("checkout/") or fallback_path.startswith("demos/"):
-        return "Not found", 404
-    return serve_react("index.html")
 
 
 # ── AI Chat (DeepSeek) ──────────────────────────────────────────────────────────
@@ -4883,6 +4875,16 @@ def plumber_demo():
 
 # Run DB init at import time (gunicorn doesn't run __main__)
 init_db()
+
+# ── React SPA catch-all (must be LAST route) ──────────────────────────────
+
+@app.route("/<path:fallback_path>")
+def serve_react_fallback(fallback_path):
+    if fallback_path.startswith("api/") or fallback_path.startswith("portal/") or \
+       fallback_path.startswith("checkout/") or fallback_path.startswith("demos/"):
+        return "Not found", 404
+    return serve_react("index.html")
+
 
 if __name__ == "__main__":
     print("\n" + "=" * 50)
