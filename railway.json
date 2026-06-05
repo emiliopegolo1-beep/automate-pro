@@ -1,6 +1,5 @@
 {
   "build": {
-    "builder": "RAILPACK",
     "buildCommand": "pip install -r requirements.txt",
     "watchPatterns": ["react-dist/**", "server.py", "Procfile", "requirements.txt"]
   },
