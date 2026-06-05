@@ -1,0 +1,8 @@
+providers:
+  - python
+  - static
+build:
+  python:
+    install: pip install -r requirements.txt
+deploy:
+  start: gunicorn server:app --bind 0.0.0.0:$PORT
