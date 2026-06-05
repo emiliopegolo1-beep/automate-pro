@@ -432,7 +432,10 @@ REACT_DIST = os.path.join(os.path.dirname(__file__), "react-dist")
 def serve_react(path):
     full = os.path.join(REACT_DIST, path)
     if os.path.isfile(full):
-        return send_from_directory(REACT_DIST, path)
+        resp = send_from_directory(REACT_DIST, path)
+        resp.headers["Cache-Control"] = "no-store, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        return resp
     return "File not found", 404
 
 
