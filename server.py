@@ -3935,9 +3935,34 @@ loadDashboard();
 
 @app.route("/api/test-email")
 def api_test_email():
-    """Test SMTP connection and return diagnostics."""
-    import traceback
+    """Diagnose outbound SMTP connectivity from Railway."""
+    import socket, traceback
     result = {"smtp_configured": bool(SMTP_USER and SMTP_PASS)}
+    
+    # DNS resolve test
+    try:
+        ips = socket.getaddrinfo(SMTP_HOST, 587)
+        result["dns_resolve"] = [ip[4][0] for ip in ips]
+    except Exception as e:
+        result["dns_error"] = str(e)
+    
+    # Port connectivity tests
+    for test_port in [587, 465, 25]:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(5)
+        try:
+            s.connect((SMTP_HOST, test_port))
+            banner = s.recv(512).decode(errors="ignore") if test_port != 465 else "ssl-mode"
+            s.close()
+            result[f"port_{test_port}"] = f"OPEN - {banner.strip()[:60]}"
+        except Exception as e:
+            result[f"port_{test_port}"] = f"BLOCKED: {e}"
+        finally:
+            try:
+                s.close()
+            except:
+                pass
+
     if result["smtp_configured"]:
         try:
             server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
@@ -3945,7 +3970,6 @@ def api_test_email():
             server.login(SMTP_USER, "****" + SMTP_PASS[-4:] if len(SMTP_PASS) > 4 else "****")
             server.quit()
             result["login"] = "success"
-            # Try sending
             result["send_test"] = send_email(SMTP_USER, "Railway SMTP Test", "If you see this, SMTP works on Railway!")
         except Exception as e:
             result["error"] = str(e)
