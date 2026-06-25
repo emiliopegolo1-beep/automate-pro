@@ -22,36 +22,63 @@ from flask import (
     send_from_directory,
 )
 
-# Email via Resend API (works on Railway, no SMTP ports needed)
-import json
+# Email integration — Gmail API (uses stored refresh token, no SMTP needed)
+import base64
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from email.mime.text import MIMEText
 
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "")
+GMAIL_CLIENT_ID = os.environ.get("GMAIL_CLIENT_ID", "")
+GMAIL_CLIENT_SECRET = os.environ.get("GMAIL_CLIENT_SECRET", "")
 
+def _get_gmail_service():
+    if not GMAIL_REFRESH_TOKEN:
+        return None
+    creds = Credentials(
+        token=None,
+        refresh_token=GMAIL_REFRESH_TOKEN,
+        client_id=GMAIL_CLIENT_ID,
+        client_secret=GMAIL_CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=["https://www.googleapis.com/auth/gmail.readonly",
+                "https://www.googleapis.com/auth/gmail.send"]
+    )
+    return build("gmail", "v1", credentials=creds)
 
 def send_email(to, subject, body):
-    """Send email via Resend API."""
-    if not RESEND_API_KEY:
-        print("[EMAIL DISABLED] Set RESEND_API_KEY env var to enable")
-        return {"success": False, "error": "Resend not configured"}
+    """Send email via Gmail API using stored refresh token."""
+    service = _get_gmail_service()
+    if not service:
+        print("[EMAIL DISABLED] Set GMAIL_REFRESH_TOKEN env var to enable")
+        return {"success": False, "error": "Gmail not configured"}
     try:
-        payload = json.dumps({
-            "from": "Automate Pro <onboarding@resend.dev>",
-            "to": [to],
-            "subject": subject,
-            "text": body,
-        }).encode()
-        req = urllib.request.Request(
-            "https://api.resend.com/emails",
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {RESEND_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            _ = resp.read()
-        print(f"[EMAIL OK] Sent '{subject}' to {to}")
+        msg = MIMEText(body)
+        msg["To"] = to
+        msg["Subject"] = subject
+        msg["From"] = "me"
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        return {"success": True}
+    except Exception as e:
+        print(f"[GMAIL ERROR] {e}")
+        return {"success": False, "error": str(e)}
+
+def send_email_sync(to, subject, body):
+    """Send email via SMTP. Works on Railway with app password."""
+    if not SMTP_USER or not SMTP_PASS:
+        print(f"[EMAIL DISABLED] Set SMTP_USER and SMTP_PASS env vars to enable")
+        return {"success": False, "error": "SMTP not configured"}
+    try:
+        msg = MIMEText(body)
+        msg["To"] = to
+        msg["Subject"] = subject
+        msg["From"] = SMTP_USER
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(SMTP_USER, [to], msg.as_string())
+        server.quit()
         return {"success": True}
     except Exception as e:
         print(f"[EMAIL ERROR] {e}")
@@ -3939,14 +3966,21 @@ loadDashboard();
 
 @app.route("/api/test-email")
 def api_test_email():
-    """Test email sending via Resend API."""
-    result = {"resend_configured": bool(RESEND_API_KEY)}
-    if result["resend_configured"]:
-        result["send_test"] = send_email(
-            "emilio.pegolo1@gmail.com",
-            "Railway Email Test",
-            "If you see this, Resend works on Railway!"
-        )
+    """Test SMTP connection and return diagnostics."""
+    import traceback
+    result = {"smtp_configured": bool(SMTP_USER and SMTP_PASS)}
+    if result["smtp_configured"]:
+        try:
+            server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
+            server.starttls()
+            server.login(SMTP_USER, "****" + SMTP_PASS[-4:] if len(SMTP_PASS) > 4 else "****")
+            server.quit()
+            result["login"] = "success"
+            # Try sending
+            result["send_test"] = send_email(SMTP_USER, "Railway SMTP Test", "If you see this, SMTP works on Railway!")
+        except Exception as e:
+            result["error"] = str(e)
+            result["traceback"] = traceback.format_exc()
     return jsonify(result)
 
 # ── Plumber Demo Page ──────────────────────────────────────────────────
