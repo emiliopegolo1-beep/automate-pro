@@ -3966,21 +3966,11 @@ loadDashboard();
 
 @app.route("/api/test-email")
 def api_test_email():
-    """Test SMTP connection and return diagnostics."""
-    import traceback
-    result = {"smtp_configured": bool(SMTP_USER and SMTP_PASS)}
-    if result["smtp_configured"]:
-        try:
-            server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
-            server.starttls()
-            server.login(SMTP_USER, "****" + SMTP_PASS[-4:] if len(SMTP_PASS) > 4 else "****")
-            server.quit()
-            result["login"] = "success"
-            # Try sending
-            result["send_test"] = send_email(SMTP_USER, "Railway SMTP Test", "If you see this, SMTP works on Railway!")
-        except Exception as e:
-            result["error"] = str(e)
-            result["traceback"] = traceback.format_exc()
+    """Test email sending via Gmail API."""
+    result = {
+        "gmail_configured": bool(GMAIL_REFRESH_TOKEN and GMAIL_CLIENT_ID),
+        "send_test": send_email("emilio.pegolo1@gmail.com", "Railway Email Test", "If you see this, emails are working again!")
+    }
     return jsonify(result)
 
 # ── Plumber Demo Page ──────────────────────────────────────────────────
