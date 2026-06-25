@@ -22,31 +22,35 @@ from flask import (
     send_from_directory,
 )
 
-# Email via SMTP (Gmail App Password) — no OAuth refresh tokens to expire
-import smtplib
-from email.mime.text import MIMEText
+# Email via Resend API (works on Railway, no SMTP ports needed)
+import json
 
-SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASS = os.environ.get("SMTP_PASS", "")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 
 
 def send_email(to, subject, body):
-    """Send email via SMTP (Gmail App Password)."""
-    if not SMTP_USER or not SMTP_PASS:
-        print("[EMAIL DISABLED] Set SMTP_USER and SMTP_PASS env vars to enable")
-        return {"success": False, "error": "SMTP not configured"}
+    """Send email via Resend API."""
+    if not RESEND_API_KEY:
+        print("[EMAIL DISABLED] Set RESEND_API_KEY env var to enable")
+        return {"success": False, "error": "Resend not configured"}
     try:
-        msg = MIMEText(body)
-        msg["To"] = to
-        msg["Subject"] = subject
-        msg["From"] = SMTP_USER
-        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
-        server.starttls()
-        server.login(SMTP_USER, SMTP_PASS)
-        server.sendmail(SMTP_USER, [to], msg.as_string())
-        server.quit()
+        payload = json.dumps({
+            "from": "Automate Pro <onboarding@resend.dev>",
+            "to": [to],
+            "subject": subject,
+            "text": body,
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            _ = resp.read()
         print(f"[EMAIL OK] Sent '{subject}' to {to}")
         return {"success": True}
     except Exception as e:
@@ -3935,45 +3939,14 @@ loadDashboard();
 
 @app.route("/api/test-email")
 def api_test_email():
-    """Diagnose outbound SMTP connectivity from Railway."""
-    import socket, traceback
-    result = {"smtp_configured": bool(SMTP_USER and SMTP_PASS)}
-    
-    # DNS resolve test
-    try:
-        ips = socket.getaddrinfo(SMTP_HOST, 587)
-        result["dns_resolve"] = [ip[4][0] for ip in ips]
-    except Exception as e:
-        result["dns_error"] = str(e)
-    
-    # Port connectivity tests
-    for test_port in [587, 465, 25]:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(5)
-        try:
-            s.connect((SMTP_HOST, test_port))
-            banner = s.recv(512).decode(errors="ignore") if test_port != 465 else "ssl-mode"
-            s.close()
-            result[f"port_{test_port}"] = f"OPEN - {banner.strip()[:60]}"
-        except Exception as e:
-            result[f"port_{test_port}"] = f"BLOCKED: {e}"
-        finally:
-            try:
-                s.close()
-            except:
-                pass
-
-    if result["smtp_configured"]:
-        try:
-            server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
-            server.starttls()
-            server.login(SMTP_USER, "****" + SMTP_PASS[-4:] if len(SMTP_PASS) > 4 else "****")
-            server.quit()
-            result["login"] = "success"
-            result["send_test"] = send_email(SMTP_USER, "Railway SMTP Test", "If you see this, SMTP works on Railway!")
-        except Exception as e:
-            result["error"] = str(e)
-            result["traceback"] = traceback.format_exc()
+    """Test email sending via Resend API."""
+    result = {"resend_configured": bool(RESEND_API_KEY)}
+    if result["resend_configured"]:
+        result["send_test"] = send_email(
+            "emilio.pegolo1@gmail.com",
+            "Railway Email Test",
+            "If you see this, Resend works on Railway!"
+        )
     return jsonify(result)
 
 # ── Plumber Demo Page ──────────────────────────────────────────────────
