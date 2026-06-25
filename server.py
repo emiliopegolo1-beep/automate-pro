@@ -22,52 +22,20 @@ from flask import (
     send_from_directory,
 )
 
-# Email integration — Gmail API (uses stored refresh token, no SMTP needed)
-import base64
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
+# Email via SMTP (Gmail App Password) — no OAuth refresh tokens to expire
+import smtplib
 from email.mime.text import MIMEText
 
-GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "")
-GMAIL_CLIENT_ID = os.environ.get("GMAIL_CLIENT_ID", "")
-GMAIL_CLIENT_SECRET = os.environ.get("GMAIL_CLIENT_SECRET", "")
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASS = os.environ.get("SMTP_PASS", "")
 
-def _get_gmail_service():
-    if not GMAIL_REFRESH_TOKEN:
-        return None
-    creds = Credentials(
-        token=None,
-        refresh_token=GMAIL_REFRESH_TOKEN,
-        client_id=GMAIL_CLIENT_ID,
-        client_secret=GMAIL_CLIENT_SECRET,
-        token_uri="https://oauth2.googleapis.com/token",
-        scopes=["https://www.googleapis.com/auth/gmail.readonly",
-                "https://www.googleapis.com/auth/gmail.send"]
-    )
-    return build("gmail", "v1", credentials=creds)
 
 def send_email(to, subject, body):
-    """Send email via Gmail API using stored refresh token."""
-    service = _get_gmail_service()
-    if not service:
-        print("[EMAIL DISABLED] Set GMAIL_REFRESH_TOKEN env var to enable")
-        return {"success": False, "error": "Gmail not configured"}
-    try:
-        msg = MIMEText(body)
-        msg["To"] = to
-        msg["Subject"] = subject
-        msg["From"] = "me"
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-        service.users().messages().send(userId="me", body={"raw": raw}).execute()
-        return {"success": True}
-    except Exception as e:
-        print(f"[GMAIL ERROR] {e}")
-        return {"success": False, "error": str(e)}
-
-def send_email_sync(to, subject, body):
-    """Send email via SMTP. Works on Railway with app password."""
+    """Send email via SMTP (Gmail App Password)."""
     if not SMTP_USER or not SMTP_PASS:
-        print(f"[EMAIL DISABLED] Set SMTP_USER and SMTP_PASS env vars to enable")
+        print("[EMAIL DISABLED] Set SMTP_USER and SMTP_PASS env vars to enable")
         return {"success": False, "error": "SMTP not configured"}
     try:
         msg = MIMEText(body)
@@ -79,6 +47,7 @@ def send_email_sync(to, subject, body):
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(SMTP_USER, [to], msg.as_string())
         server.quit()
+        print(f"[EMAIL OK] Sent '{subject}' to {to}")
         return {"success": True}
     except Exception as e:
         print(f"[EMAIL ERROR] {e}")
