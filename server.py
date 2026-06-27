@@ -144,19 +144,11 @@ def get_db():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL environment variable not set")
     dsn = DATABASE_URL.strip()
+    # Use Supabase PgBouncer pooler (port 6543) — works on Render Free tier
+    dsn = dsn.replace(":5432", ":6543").replace("/postgres", "/postgres", 1)
     if "sslmode" not in dsn and "postgresql" in dsn:
         separator = "?" if "?" not in dsn else "&"
         dsn = f"{dsn}{separator}sslmode=require"
-    # Force IPv4 — Render free tier blocks IPv6
-    import socket as _socket
-    from urllib.parse import urlparse as _urlparse
-    try:
-        parsed = _urlparse(dsn)
-        if parsed.hostname:
-            ip = _socket.gethostbyname(parsed.hostname)
-            dsn = dsn.replace(parsed.hostname, ip, 1)
-    except Exception:
-        pass
     conn = psycopg2.connect(dsn)
     conn.cursor_factory = psycopg2.extras.RealDictCursor
     return conn
