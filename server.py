@@ -477,6 +477,13 @@ def api_chat():
 
 @app.route("/api/lead", methods=["POST"])
 def api_lead():
+    import traceback as _tb
+    try:
+        return _api_lead_impl()
+    except Exception as _e:
+        return jsonify({"error": str(_e), "traceback": _tb.format_exc()}), 500
+
+def _api_lead_impl():
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
