@@ -6,4 +6,4 @@ google-auth-oauthlib>=1.0
 gunicorn>=22.0
 python-dotenv>=1.0
 stripe>=15.0
-libsql-experimental>=0.0.55
+requests>=2.32

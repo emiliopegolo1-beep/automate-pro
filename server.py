@@ -2,9 +2,9 @@
 """Automate Pro — Lead Capture & Admin Dashboard Server."""
 import os
 import sys
+import json
 import uuid
-
-import libsql_experimental as libsql
+import requests
 import functools
 from datetime import datetime, date, timedelta
 
@@ -105,9 +105,24 @@ NOTIFY_EMAIL = "emilio.pegolo1@gmail.com"
 DASHBOARD_PASSWORD = "automate2026"
 DOMAIN = os.environ.get("DOMAIN", "automate-pro-production.up.railway.app")
 
-# ── Turso Row Wrapper ────────────────────────────────────────────────────────
-# libsql-experimental returns tuples, but the app expects dict-like rows
-# (sqlite3.Row). RowDict supports both key and index access.
+# ── Turso HTTP Client (zero native deps) ─────────────────────────────────────
+# Calls Turso's v2/pipeline REST API. Each execute() is a self-contained
+# HTTP POST with execute + close, so DDL/DML auto-commits immediately.
+
+def _turso_arg(val):
+    """Convert a Python value to a Turso typed arg dict."""
+    if val is None:
+        return {"type": "null"}
+    if isinstance(val, bool):
+        return {"type": "integer", "value": str(int(val))}
+    if isinstance(val, int):
+        return {"type": "integer", "value": str(val)}
+    if isinstance(val, float):
+        return {"type": "float", "value": val}
+    if isinstance(val, bytes):
+        import base64 as _b64
+        return {"type": "blob", "base64": _b64.b64encode(val).decode()}
+    return {"type": "text", "value": str(val)}
 
 class RowDict(dict):
     """A dict that also supports integer-index access like sqlite3.Row."""
@@ -118,41 +133,100 @@ class RowDict(dict):
 
 
 class TursoResult:
-    """Wraps a libsql cursor so fetchone/fetchall return RowDict objects."""
-    def __init__(self, cursor):
-        self._cur = cursor
-        self.description = cursor.description
+    """Wraps a Turso HTTP response so fetchone/fetchall return RowDict objects."""
+    def __init__(self, cols, rows):
+        self._cols = [c["name"] for c in cols]
+        self._rows = rows
+        self.description = [(c["name"], None, None, None, None, None, None) for c in cols]
+        self._pos = 0
+
+    @staticmethod
+    def _coerce(col):
+        """Convert a Turso typed column value to the proper Python type."""
+        t = col.get("type", "text")
+        if t == "null":
+            return None
+        if t == "integer":
+            return int(col.get("value", "0"))
+        if t == "float":
+            return float(col.get("value", "0.0"))
+        if t == "blob":
+            import base64 as _b64
+            return _b64.b64decode(col.get("base64", ""))
+        return col.get("value", "")  # text
 
     def fetchone(self):
-        row = self._cur.fetchone()
-        if row is None:
+        if self._pos >= len(self._rows):
             return None
-        cols = [d[0] for d in self._cur.description]
-        return RowDict(zip(cols, row))
+        raw = self._rows[self._pos]
+        self._pos += 1
+        vals = [self._coerce(c) for c in raw]
+        return RowDict(zip(self._cols, vals))
 
     def fetchall(self):
-        rows = self._cur.fetchall()
-        cols = [d[0] for d in self._cur.description]
-        return [RowDict(zip(cols, r)) for r in rows]
+        results = []
+        while True:
+            r = self.fetchone()
+            if r is None:
+                break
+            results.append(r)
+        return results
 
 
 class TursoConnection:
-    """Thin wrapper so conn.execute() returns a TursoResult with dict rows."""
-    def __init__(self, raw_conn):
-        self._conn = raw_conn
+    """HTTP-based SQLite connection to Turso. Each execute() auto-commits."""
+    def __init__(self, url, token):
+        # libsql://db-org.region.turso.io → https://db-org.region.turso.io
+        self._base = url.replace("libsql://", "https://")
+        self._token = token
+        self._sess = requests.Session()
+        self._sess.headers.update({
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        })
+
+    def _pipeline(self, requests_payload):
+        body = {"requests": requests_payload}
+        r = self._sess.post(f"{self._base}/v2/pipeline", json=body, timeout=30)
+        r.raise_for_status()
+        return r.json()
 
     def execute(self, sql, params=None):
-        cur = self._conn.cursor()
-        if params is not None and not isinstance(params, tuple):
-            params = tuple(params)
-        cur.execute(sql, params or ())
-        return TursoResult(cur)
+        # Build typed args
+        args = []
+        if params:
+            for p in params:
+                args.append(_turso_arg(p))
+
+        stmt = {"sql": sql}
+        if args:
+            stmt["args"] = args
+
+        payload = [
+            {"type": "execute", "stmt": stmt},
+            {"type": "close"},
+        ]
+        resp = self._pipeline(payload)
+
+        # Extract columns and rows from the first ok result
+        cols = []
+        rows = []
+        for result in resp.get("results", []):
+            if result.get("type") == "ok":
+                inner = result.get("response", {})
+                if inner.get("type") == "execute":
+                    r = inner.get("result", {})
+                    cols = r.get("cols", [])
+                    rows = r.get("rows", [])
+                    break
+
+        return TursoResult(cols, rows)
 
     def commit(self):
-        self._conn.commit()
+        pass  # each execute() already commits via "close"
 
     def close(self):
-        self._conn.close()
+        self._sess.close()
 
 CLIENT_CREDENTIALS = {
     "bob": {"name": "Bob's Plumbing", "password": "plumb2026", "notify_email": "bob@bobsplumbing.com"},
@@ -202,17 +276,13 @@ def create_test_products():
 
 
 def get_db():
-    """Connect to Turso (remote SQLite). Falls back to local SQLite for dev."""
+    """Connect to Turso (remote SQLite via HTTP). Falls back to local SQLite."""
     if TURSO_URL and TURSO_TOKEN:
-        try:
-            raw = libsql.connect(TURSO_URL, auth_token=TURSO_TOKEN)
-            return TursoConnection(raw)
-        except Exception as e:
-            print(f"[DB] Turso connect failed: {e}")
-            raise
+        return TursoConnection(TURSO_URL, TURSO_TOKEN)
     # Fallback: local SQLite file
     import sqlite3 as _sqlite3
-    conn = _sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), "leads.db"))
+    DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "leads.db")
+    conn = _sqlite3.connect(DB_PATH)
     conn.row_factory = _sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
