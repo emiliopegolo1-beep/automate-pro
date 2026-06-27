@@ -147,6 +147,16 @@ def get_db():
     if "sslmode" not in dsn and "postgresql" in dsn:
         separator = "?" if "?" not in dsn else "&"
         dsn = f"{dsn}{separator}sslmode=require"
+    # Force IPv4 — Render free tier blocks IPv6
+    import socket as _socket
+    from urllib.parse import urlparse as _urlparse
+    try:
+        parsed = _urlparse(dsn)
+        if parsed.hostname:
+            ip = _socket.gethostbyname(parsed.hostname)
+            dsn = dsn.replace(parsed.hostname, ip, 1)
+    except Exception:
+        pass
     conn = psycopg2.connect(dsn)
     conn.cursor_factory = psycopg2.extras.RealDictCursor
     return conn
