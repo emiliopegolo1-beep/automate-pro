@@ -2,8 +2,9 @@
 """Automate Pro — Lead Capture & Admin Dashboard Server."""
 import os
 import sys
-import sqlite3
 import uuid
+
+import libsql_experimental as libsql
 import functools
 from datetime import datetime, date, timedelta
 
@@ -98,10 +99,60 @@ def send_email_sync(to, subject, body):
 app = Flask(__name__)
 app.secret_key = os.urandom(32).hex()
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "leads.db")
+TURSO_URL = os.environ.get("TURSO_URL", "")
+TURSO_TOKEN = os.environ.get("TURSO_TOKEN", "")
 NOTIFY_EMAIL = "emilio.pegolo1@gmail.com"
 DASHBOARD_PASSWORD = "automate2026"
 DOMAIN = os.environ.get("DOMAIN", "automate-pro-production.up.railway.app")
+
+# ── Turso Row Wrapper ────────────────────────────────────────────────────────
+# libsql-experimental returns tuples, but the app expects dict-like rows
+# (sqlite3.Row). RowDict supports both key and index access.
+
+class RowDict(dict):
+    """A dict that also supports integer-index access like sqlite3.Row."""
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+
+
+class TursoResult:
+    """Wraps a libsql cursor so fetchone/fetchall return RowDict objects."""
+    def __init__(self, cursor):
+        self._cur = cursor
+        self.description = cursor.description
+
+    def fetchone(self):
+        row = self._cur.fetchone()
+        if row is None:
+            return None
+        cols = [d[0] for d in self._cur.description]
+        return RowDict(zip(cols, row))
+
+    def fetchall(self):
+        rows = self._cur.fetchall()
+        cols = [d[0] for d in self._cur.description]
+        return [RowDict(zip(cols, r)) for r in rows]
+
+
+class TursoConnection:
+    """Thin wrapper so conn.execute() returns a TursoResult with dict rows."""
+    def __init__(self, raw_conn):
+        self._conn = raw_conn
+
+    def execute(self, sql, params=None):
+        cur = self._conn.cursor()
+        if params is not None and not isinstance(params, tuple):
+            params = tuple(params)
+        cur.execute(sql, params or ())
+        return TursoResult(cur)
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
 
 CLIENT_CREDENTIALS = {
     "bob": {"name": "Bob's Plumbing", "password": "plumb2026", "notify_email": "bob@bobsplumbing.com"},
@@ -151,8 +202,18 @@ def create_test_products():
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    """Connect to Turso (remote SQLite). Falls back to local SQLite for dev."""
+    if TURSO_URL and TURSO_TOKEN:
+        try:
+            raw = libsql.connect(TURSO_URL, auth_token=TURSO_TOKEN)
+            return TursoConnection(raw)
+        except Exception as e:
+            print(f"[DB] Turso connect failed: {e}")
+            raise
+    # Fallback: local SQLite file
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), "leads.db"))
+    conn.row_factory = _sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
@@ -196,12 +257,12 @@ def init_db():
     for col_name, col_def in extra_client_cols:
         try:
             conn.execute(f"ALTER TABLE leads ADD COLUMN {col_name} {col_def}")
-        except sqlite3.OperationalError:
+        except Exception:
             pass
     for col_name, col_def in columns_to_add:
         try:
             conn.execute(f"ALTER TABLE leads ADD COLUMN {col_name} {col_def}")
-        except sqlite3.OperationalError:
+        except Exception:
             pass  # column already exists
 
     # Payments table
@@ -258,7 +319,7 @@ def init_db():
     for col_name, col_def in sub_cols:
         try:
             conn.execute(f"ALTER TABLE invoices ADD COLUMN {col_name} {col_def}")
-        except sqlite3.OperationalError:
+        except Exception:
             pass
 
     conn.commit()
