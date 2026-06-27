@@ -140,25 +140,25 @@ def create_test_products():
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-_POOLER_HOST = "aws-0-ap-southeast-1.pooler.supabase.com"
-
 def get_db():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL environment variable not set")
     dsn = DATABASE_URL.strip()
-    # Route through Supabase pooler for IPv4 (Render Free blocks IPv6)
-    import re as _re, socket as _sock
-    m = _re.search(r'@([^:]+):(\d+)', dsn)
-    if m and m.group(1) != _POOLER_HOST and 'pooler.supabase.com' not in m.group(1):
-        orig_host = m.group(1)
-        port = m.group(2)
-        user = dsn.split('://')[1].split('@')[0].split(':')[0]
-        pwd = dsn.split('://')[1].split('@')[0].split(':')[1] if ':' in dsn.split('://')[1].split('@')[0] else ''
+    import re as _re, socket as _sock, urllib.parse as _up
+    parsed = _up.urlparse(dsn)
+    hostname = parsed.hostname or ""
+    port = str(parsed.port or 5432)
+    user = parsed.username or "postgres"
+    pwd = parsed.password or ""
+    dbname = parsed.path.lstrip("/") or "postgres"
+    # Render Free blocks IPv6; route through pooler with IPv4 + SNI
+    if "pooler.supabase.com" not in hostname:
         try:
-            ip = _sock.gethostbyname(_POOLER_HOST)
+            pooler_ip = _sock.gethostbyname("aws-0-ap-southeast-1.pooler.supabase.com")
+            dsn = f"postgresql://{user}:{pwd}@{pooler_ip}:{port}/{dbname}?sslmode=require&host={hostname}"
         except Exception:
-            ip = _POOLER_HOST
-        dsn = f"postgresql://{user}:{pwd}@{ip}:{port}/postgres?sslmode=require&host={orig_host}"
+            if "sslmode" not in dsn:
+                dsn += "&sslmode=require" if "?" in dsn else "?sslmode=require"
     elif "sslmode" not in dsn:
         dsn += "&sslmode=require" if "?" in dsn else "?sslmode=require"
     conn = psycopg2.connect(dsn, connect_timeout=30)
