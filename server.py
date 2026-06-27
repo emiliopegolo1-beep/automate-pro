@@ -4862,7 +4862,11 @@ def plumber_demo():
 
 
 # Run DB init at import time (gunicorn doesn't run __main__)
-init_db()
+try:
+    init_db()
+    print("[INIT] Database tables ready")
+except Exception as e:
+    print(f"[INIT] Database init failed (will retry on first request): {e}")
 
 # ── React SPA catch-all (must be LAST route) ──────────────────────────────
 
