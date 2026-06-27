@@ -23,3 +23,5 @@ services:
         sync: false
       - key: DOMAIN
         value: "https://automate-pro-jqy1.onrender.com"
+      - key: CRON_SECRET
+        sync: false

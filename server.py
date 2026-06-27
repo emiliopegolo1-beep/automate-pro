@@ -643,7 +643,60 @@ def build_auto_reply_body(name, business_type):
     return _html_email(f"Thanks for reaching out, {name}!", content)
 
 
-def build_notify_body(name, email, business_type, message, timestamp):
+def build_follow_up_email(client_name, lead_name, delay_hours):
+    """Build HTML follow-up email based on delay."""
+    if delay_hours == 0:
+        subject = f"Got your enquiry, {lead_name}!"
+        body = f"""
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#191816;border:1px solid rgba(212,165,100,0.12);border-radius:14px">
+<tr><td style="padding:36px 28px">
+<h1 style="font-size:22px;color:#F0EBE1;margin:0 0 6px;font-weight:600">We got your message, {lead_name}</h1>
+<h2 style="font-size:13px;color:#D4A564;margin:0 0 24px;font-weight:400;font-family:monospace;letter-spacing:0.06em">{client_name}</h2>
+<p style="font-size:15px;line-height:1.7;color:rgba(240,235,225,0.7);margin:0 0 16px">Thanks for reaching out! {client_name} has received your enquiry and will be in touch shortly — usually within a few hours during business hours.</p>
+<p style="font-size:15px;line-height:1.7;color:rgba(240,235,225,0.7);margin:0 0 20px">If it's urgent, feel free to reply to this email and we'll fast-track it.</p>
+<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(212,165,100,0.2),transparent);margin:28px 0"></div>
+<p style="font-size:14px;color:rgba(240,235,225,0.45);margin:0">Talk soon,<br><b style="color:rgba(240,235,225,0.8)">{client_name}</b></p>
+</td></tr>
+</table>
+</td></tr>
+</table>"""
+    elif delay_hours <= 72:
+        subject = f"How did we do, {lead_name}?"
+        body = f"""
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#191816;border:1px solid rgba(212,165,100,0.12);border-radius:14px">
+<tr><td style="padding:36px 28px">
+<h1 style="font-size:22px;color:#F0EBE1;margin:0 0 6px;font-weight:600">Just checking in, {lead_name}</h1>
+<h2 style="font-size:13px;color:#D4A564;margin:0 0 24px;font-weight:400;font-family:monospace;letter-spacing:0.06em">{client_name}</h2>
+<p style="font-size:15px;line-height:1.7;color:rgba(240,235,225,0.7);margin:0 0 16px">A few days ago you reached out to {client_name}. We wanted to make sure everything was handled properly.</p>
+<p style="font-size:15px;line-height:1.7;color:rgba(240,235,225,0.7);margin:0 0 20px">Did someone get in touch? Was the work completed to your satisfaction? If you still need help, just reply and we'll make it a priority.</p>
+<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(212,165,100,0.2),transparent);margin:28px 0"></div>
+<p style="font-size:14px;color:rgba(240,235,225,0.45);margin:0">{client_name}</p>
+</td></tr>
+</table>
+</td></tr>
+</table>"""
+    else:
+        subject = f"How was your experience with {client_name}?"
+        body = f"""
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#191816;border:1px solid rgba(212,165,100,0.12);border-radius:14px">
+<tr><td style="padding:36px 28px">
+<h1 style="font-size:22px;color:#F0EBE1;margin:0 0 6px;font-weight:600">One last thing, {lead_name}</h1>
+<h2 style="font-size:13px;color:#D4A564;margin:0 0 24px;font-weight:400;font-family:monospace;letter-spacing:0.06em">{client_name}</h2>
+<p style="font-size:15px;line-height:1.7;color:rgba(240,235,225,0.7);margin:0 0 16px">We hope {client_name} took great care of you. If you were happy with the service, a quick Google review makes a world of difference for a local business.</p>
+<p style="font-size:15px;line-height:1.7;color:rgba(240,235,225,0.7);margin:0 0 20px">And if anything wasn't up to standard, please reply and let us know — we'll make it right.</p>
+<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(212,165,100,0.2),transparent);margin:28px 0"></div>
+<p style="font-size:14px;color:rgba(240,235,225,0.45);margin:0">Thanks for choosing {client_name},<br><b style="color:rgba(240,235,225,0.8)">{client_name}</b></p>
+</td></tr>
+</table>
+</td></tr>
+</table>"""
+    return subject, _html_email(subject, body)
     content = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
 <tr><td>
@@ -1072,10 +1125,29 @@ def run_workflow(client_slug, lead_id, lead_name, lead_email, lead_phone, lead_m
         sms_result = send_twilio_sms(wf["sms_number"], sms_body)
         results.append(("sms", sms_result))
 
-    # 2. Email sequence (mark first email time)
+    # 2. Email sequence — send instant email now, schedule the rest
     if wf.get("email_sequence_enabled"):
-        save_email_sequence_jobs(lead_id, client_slug, wf)
-        results.append(("email_sequence", "scheduled"))
+        delays_str = wf.get("email_delay_hours", "0,72,168")
+        try:
+            delays = [int(h.strip()) for h in delays_str.split(",") if h.strip()]
+        except ValueError:
+            delays = [0]
+
+        for delay in delays:
+            if delay == 0:
+                # Send instant follow-up now
+                subj, body = build_follow_up_email(client["name"] or "Our Team", lead_name, 0)
+                r = send_email(lead_email, subj, body)
+                results.append(("email_instant", {"success": r.get("success", False)}))
+            else:
+                # Schedule for later
+                save_one_email_job(lead_id, client_slug, delay)
+                results.append(("email_scheduled", f"{delay}h"))
+
+        if all(d == 0 for d in delays):
+            results.append(("email_sequence", "all_sent"))
+        else:
+            results.append(("email_sequence", "scheduled"))
 
     # 3. Webhook
     if wf.get("webhook_enabled") and wf.get("webhook_url"):
@@ -1138,14 +1210,8 @@ def send_twilio_sms(to_number, body):
 
 # ── Email Sequences ──
 
-def save_email_sequence_jobs(lead_id, client_slug, wf):
-    """Record that an email sequence was triggered for this lead."""
-    delays_str = wf.get("email_delay_hours", "0,72,168")
-    try:
-        delays = [int(h.strip()) for h in delays_str.split(",") if h.strip()]
-    except ValueError:
-        delays = [0]
-
+def save_one_email_job(lead_id, client_slug, delay_hours):
+    """Schedule a single follow-up email for later delivery."""
     conn = get_db()
     conn.execute(
         """CREATE TABLE IF NOT EXISTS email_jobs (
@@ -1157,14 +1223,80 @@ def save_email_sequence_jobs(lead_id, client_slug, wf):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )"""
     )
-    for delay in delays:
-        conn.execute(
-            "INSERT INTO email_jobs (id, lead_id, client_id, delay_hours) VALUES (?, ?, ?, ?)",
-            (str(uuid.uuid4())[:8], lead_id, client_slug, delay),
-        )
+    conn.execute(
+        "INSERT INTO email_jobs (id, lead_id, client_id, delay_hours) VALUES (?, ?, ?, ?)",
+        (str(uuid.uuid4())[:8], lead_id, client_slug, delay_hours),
+    )
     conn.commit()
     conn.close()
-    print(f"[EmailSeq] {client_slug}: {len(delays)} emails scheduled for lead {lead_id}")
+    print(f"[EmailSeq] {client_slug}: follow-up scheduled in {delay_hours}h for lead {lead_id}")
+
+CRON_SECRET = os.environ.get("CRON_SECRET", "")
+
+@app.route("/api/cron/send-emails", methods=["POST", "GET"])
+def cron_send_emails():
+    """Send due follow-up emails. Called by cron-job.org every hour."""
+    try:
+        if CRON_SECRET:
+            secret = request.headers.get("X-Cron-Secret", "") or request.args.get("secret", "")
+            if secret != CRON_SECRET:
+                return jsonify({"error": "Unauthorized"}), 401
+    except RuntimeError:
+        pass  # Not in request context (testing mode)
+
+    conn = get_db()
+    # Find unsent email jobs where delay has elapsed
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS email_jobs (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT,
+            client_id TEXT,
+            delay_hours INTEGER,
+            sent INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    due = conn.execute(
+        """SELECT ej.*, l.name as lead_name, l.email as lead_email
+           FROM email_jobs ej
+           JOIN leads l ON l.id = ej.lead_id
+           WHERE ej.sent = 0
+           AND datetime(ej.created_at, '+' || ej.delay_hours || ' hours') <= datetime(?)""",
+        (now,),
+    ).fetchall()
+
+    sent_count = 0
+    error_count = 0
+    for job in due:
+        try:
+            client = get_client_by_slug(job["client_id"])
+            if not client:
+                conn.execute("UPDATE email_jobs SET sent = -1 WHERE id = ?", (job["id"],))
+                conn.commit()
+                error_count += 1
+                continue
+
+            subject, body = build_follow_up_email(
+                client["name"] or "Our Team",
+                job["lead_name"] or "there",
+                job["delay_hours"],
+            )
+            result = send_email(job["lead_email"], subject, body)
+            if result.get("success"):
+                conn.execute("UPDATE email_jobs SET sent = 1 WHERE id = ?", (job["id"],))
+                conn.commit()
+                sent_count += 1
+                print(f"[Cron] Sent follow-up to {job['lead_email']} ({job['delay_hours']}h)")
+            else:
+                error_count += 1
+                print(f"[Cron] Failed to send to {job['lead_email']}: {result.get('error')}")
+        except Exception as e:
+            error_count += 1
+            print(f"[Cron] Error processing job {job['id']}: {e}")
+
+    conn.close()
+    return jsonify({"success": True, "sent": sent_count, "errors": error_count, "checked": len(due)})
 
 
 # ── Webhooks ──
