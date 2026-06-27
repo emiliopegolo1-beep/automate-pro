@@ -1454,7 +1454,7 @@ loadLeads();
 @app.route("/api/clients", methods=["GET"])
 def api_clients():
     """List all clients."""
-    if not session.get("authenticated"):
+    if not session.get("logged_in"):
         return jsonify({"error": "Unauthorized"}), 401
     clients = get_all_clients()
     return jsonify(clients)
@@ -1462,7 +1462,7 @@ def api_clients():
 @app.route("/api/clients", methods=["POST"])
 def api_clients_create():
     """Add or update a client."""
-    if not session.get("authenticated"):
+    if not session.get("logged_in"):
         return jsonify({"error": "Unauthorized"}), 401
     data = request.get_json(silent=True)
     if not data:
@@ -1510,7 +1510,7 @@ def api_clients_create():
 @app.route("/api/clients/<client_id>", methods=["DELETE"])
 def api_clients_delete(client_id):
     """Delete a client."""
-    if not session.get("authenticated"):
+    if not session.get("logged_in"):
         return jsonify({"error": "Unauthorized"}), 401
     client = get_client_by_id(client_id)
     if not client:
@@ -1524,7 +1524,7 @@ def api_clients_delete(client_id):
 @app.route("/api/clients/<client_id>/stripe", methods=["POST"])
 def api_clients_stripe(client_id):
     """Generate Stripe price IDs for a client with custom amounts."""
-    if not session.get("authenticated"):
+    if not session.get("logged_in"):
         return jsonify({"error": "Unauthorized"}), 401
     client = get_client_by_id(client_id)
     if not client:
