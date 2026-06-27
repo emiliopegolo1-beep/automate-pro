@@ -90,7 +90,7 @@ app.secret_key = os.urandom(32).hex()
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "leads.db")
 NOTIFY_EMAIL = "emilio.pegolo1@gmail.com"
 DASHBOARD_PASSWORD = "automate2026"
-DOMAIN = "automate-pro-production.up.railway.app"
+DOMAIN = os.environ.get("DOMAIN", "automate-pro-production.up.railway.app")
 
 CLIENT_CREDENTIALS = {
     "bob": {"name": "Bob's Plumbing", "password": "plumb2026", "notify_email": "bob@bobsplumbing.com"},
