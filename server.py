@@ -835,6 +835,169 @@ def api_chat():
         return jsonify({"reply": "Sorry, I'm having trouble connecting. Please email us at hello@automatepro.ai!"})
 
 
+# ── AI Business Assistant ─────────────────────────────────────────────────────
+
+def _gather_business_context():
+    """Build a text summary of the entire business for the AI assistant."""
+    conn = get_db()
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    first_of_month = now.replace(day=1).strftime("%Y-%m-%d")
+    week_ago = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+
+    # Leads totals
+    total_leads = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
+    new_this_week = conn.execute(
+        "SELECT COUNT(*) FROM leads WHERE created_at >= ?", (week_ago,)
+    ).fetchone()[0]
+    new_this_month = conn.execute(
+        "SELECT COUNT(*) FROM leads WHERE created_at >= ?", (first_of_month,)
+    ).fetchone()[0]
+
+    # Pipeline breakdown
+    status_rows = conn.execute(
+        "SELECT status, COUNT(*) as cnt FROM leads GROUP BY status"
+    ).fetchall()
+    by_status = {r["status"]: r["cnt"] for r in status_rows}
+    pipeline = []
+    for s in ("new", "call_scheduled", "call_done", "building", "demo_ready", "delivered", "paid"):
+        pipeline.append(f"  {s}: {by_status.get(s, 0)}")
+
+    # Revenue
+    total_rev = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'completed'"
+    ).fetchone()[0]
+    monthly_rev = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'completed' AND created_at >= ?",
+        (first_of_month,),
+    ).fetchone()[0]
+
+    # Clients
+    clients = conn.execute(
+        "SELECT name, slug, status, setup_amount, monthly_amount, plan FROM clients ORDER BY name"
+    ).fetchall()
+    active_clients = [c for c in clients if c["status"] == "active"]
+
+    # Recent leads
+    recent = conn.execute(
+        "SELECT name, email, business_type, status, created_at FROM leads ORDER BY created_at DESC LIMIT 10"
+    ).fetchall()
+
+    # Invoices
+    total_invoiced = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM invoices"
+    ).fetchone()[0]
+    unpaid = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM invoices WHERE status NOT IN ('paid','cancelled')"
+    ).fetchone()[0]
+
+    # Recurring monthly revenue
+    mrr = sum(
+        (c["monthly_amount"] or 0) for c in clients
+        if c["status"] == "active" and (c["monthly_amount"] or 0) > 0
+    )
+
+    conn.close()
+
+    ctx = f"""Current Business Snapshot ({today}):
+
+OVERVIEW:
+- Total leads ever: {total_leads}
+- New leads this week: {new_this_week}
+- New leads this month: {new_this_month}
+- Total revenue collected: ${total_rev:,.2f}
+- Revenue this month: ${monthly_rev:,.2f}
+- Total invoiced: ${total_invoiced:,.2f}
+- Unpaid invoices: ${unpaid:,.2f}
+- MRR (monthly recurring): ${mrr:,.2f}
+
+PIPELINE:
+{chr(10).join(pipeline)}
+
+ACTIVE CLIENTS ({len(active_clients)}):
+"""
+    for c in active_clients:
+        ctx += f"  - {c['name']} (slug: {c['slug']}, plan: {c['plan']}, setup: ${c['setup_amount']:,.0f}, monthly: ${c['monthly_amount']:,.0f})\n"
+
+    ctx += f"\nALL CLIENTS ({len(clients)}):\n"
+    for c in clients:
+        tags = []
+        if c["status"] == "active":
+            tags.append("ACTIVE")
+        elif c["status"] == "test":
+            tags.append("TEST")
+        ctx += f"  - {c['name']} ({c['status']}) — ${c['monthly_amount']:,.0f}/mo {' '.join(tags)}\n"
+
+    ctx += f"\nRECENT LEADS (last {len(recent)}):\n"
+    for r in recent:
+        ctx += f"  - {r['name']} ({r['email']}) — {r['business_type'] or 'N/A'} — {r['status']} — {r['created_at']}\n"
+
+    return ctx
+
+
+@app.route("/api/assistant", methods=["POST"])
+def api_assistant():
+    """AI business assistant with full context."""
+    if not session.get("logged_in"):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json(silent=True)
+    if not data or "message" not in data:
+        return jsonify({"error": "Message required"}), 400
+
+    user_msg = data["message"][:2000]
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+
+    if not api_key:
+        return jsonify({"reply": "DeepSeek API key is not configured."})
+
+    try:
+        # Gather live business context
+        context = _gather_business_context()
+
+        system_prompt = (
+            "You are Atlas, Automate Pro's AI business assistant. You have real-time access "
+            "to the company's data — leads, revenue, pipeline, clients, and invoices.\n\n"
+            "Your rules:\n"
+            "1. Answer questions using the business context provided below.\n"
+            "2. Be direct and data-driven — cite specific numbers when relevant.\n"
+            "3. If the data shows a problem, flag it and suggest what to do.\n"
+            "4. If asked about something not in the context, say so honestly.\n"
+            "5. Keep responses concise — 2-5 sentences unless asked for detail.\n"
+            "6. Use a professional but friendly tone. You work for Emilio, the CEO.\n\n"
+            "BUSINESS CONTEXT:\n"
+            f"{context}"
+        )
+
+        body = json.dumps({
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg}
+            ],
+            "max_tokens": 600,
+            "temperature": 0.7
+        }).encode()
+
+        req = urllib.request.Request(
+            "https://api.deepseek.com/v1/chat/completions",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            result = json.loads(resp.read())
+            reply = result["choices"][0]["message"]["content"]
+            return jsonify({"reply": reply})
+
+    except Exception as e:
+        print(f"[Atlas] Error: {e}")
+        return jsonify({"reply": "I couldn't process that right now. Try again in a moment."}), 500
+
+
 @app.route("/api/lead", methods=["POST"])
 def api_lead():
     data = request.get_json(silent=True)
@@ -3547,6 +3710,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-users"/></svg>
       Clients
     </a>
+    <a href="#" onclick="expandAtlas(); return false;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-sparkles"/></svg>
+      Assistant
+    </a>
   </nav>
   <div class="logout-section">
     <button class="logout-btn" onclick="logout()">
@@ -3819,6 +3986,237 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   transform: translateX(20px);
   background: var(--green);
 }
+</style>
+
+<!-- ── Atlas AI Assistant ── -->
+<style>
+  /* Floating chat bubble */
+  .atlas-bubble {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #D4A564, #B8860B);
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 24px rgba(212,165,100,0.35);
+    z-index: 9998;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .atlas-bubble:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 32px rgba(212,165,100,0.5);
+  }
+  .atlas-bubble svg { color: #0F172A; }
+
+  /* Chat panel */
+  .atlas-panel {
+    position: fixed;
+    bottom: 96px;
+    right: 24px;
+    width: 400px;
+    height: 560px;
+    background: #1E293B;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    display: none;
+    flex-direction: column;
+    z-index: 9999;
+    box-shadow: 0 8px 48px rgba(0,0,0,0.5);
+    overflow: hidden;
+  }
+  .atlas-panel.open { display: flex; }
+  .atlas-panel-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(255,255,255,0.02);
+  }
+  .atlas-panel-header .title {
+    font-weight: 700;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .atlas-panel-header .title .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22C55E;
+    animation: pulse-dot 2s infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .atlas-panel-header .actions { display: flex; gap: 8px; }
+  .atlas-panel-header .actions button {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.15);
+    color: var(--text-muted);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: 0.15s;
+  }
+  .atlas-panel-header .actions button:hover { color: #fff; border-color: rgba(255,255,255,0.3); }
+  .atlas-panel-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .atlas-msg {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    animation: msg-in 0.2s ease;
+  }
+  @keyframes msg-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .atlas-msg.user {
+    align-self: flex-end;
+    background: rgba(212,165,100,0.15);
+    border: 1px solid rgba(212,165,100,0.25);
+    color: #fff;
+  }
+  .atlas-msg.assistant {
+    align-self: flex-start;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: #F8FAFC;
+  }
+  .atlas-msg.assistant .label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  .atlas-panel-input {
+    padding: 12px 16px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    display: flex;
+    gap: 8px;
+  }
+  .atlas-panel-input input {
+    flex: 1;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 10px 14px;
+    color: #fff;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+  }
+  .atlas-panel-input input:focus { border-color: var(--accent); }
+  .atlas-panel-input button {
+    background: var(--accent);
+    border: none;
+    border-radius: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    color: #0F172A;
+    font-weight: 700;
+    font-size: 13px;
+    transition: 0.15s;
+  }
+  .atlas-panel-input button:hover { background: var(--accent-hover); }
+  .atlas-typing { display: flex; gap: 4px; padding: 10px 14px; }
+  .atlas-typing span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    animation: typing 1.4s infinite;
+  }
+  .atlas-typing span:nth-child(2) { animation-delay: 0.2s; }
+  .atlas-typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes typing { 0%,60%,100% { opacity: 0.3; } 30% { opacity: 1; } }
+
+  /* Fullscreen overlay */
+  .atlas-fullscreen {
+    position: fixed;
+    inset: 0;
+    background: #0F172A;
+    z-index: 10000;
+    display: none;
+    flex-direction: column;
+  }
+  .atlas-fullscreen.open { display: flex; }
+  .atlas-fullscreen-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .atlas-fullscreen-header .title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+  .atlas-fullscreen-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    max-width: 800px;
+    margin: 0 auto;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .atlas-fullscreen-input {
+    padding: 16px 24px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    display: flex;
+    gap: 10px;
+    max-width: 800px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  .atlas-fullscreen-input input {
+    flex: 1;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 12px 18px;
+    color: #fff;
+    font-size: 15px;
+    font-family: inherit;
+    outline: none;
+  }
+  .atlas-fullscreen-input input:focus { border-color: var(--accent); }
+  .atlas-fullscreen-input button {
+    background: var(--accent);
+    border: none;
+    border-radius: 12px;
+    padding: 12px 24px;
+    cursor: pointer;
+    color: #0F172A;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .atlas-fullscreen-input button:hover { background: var(--accent-hover); }
+
+  @media (max-width: 500px) {
+    .atlas-panel { width: calc(100vw - 32px); right: 16px; bottom: 80px; height: 480px; }
+    .atlas-bubble { right: 16px; bottom: 16px; }
+  }
 </style>
 
 <!-- Confirm Invoice Modal -->
@@ -4692,11 +5090,179 @@ function copyText(text) {
   navigator.clipboard.writeText(text).catch(() => {});
 }
 
+// ── Atlas AI Chat ──
+let atlasOpen = false;
+let atlasFS = false;
+
+function toggleAtlas() {
+  atlasOpen = !atlasOpen;
+  $('atlas-panel').classList.toggle('open', atlasOpen);
+  if (atlasOpen) setTimeout(() => $('atlas-input').focus(), 200);
+}
+
+function expandAtlas() {
+  atlasFS = true;
+  $('atlas-panel').classList.remove('open');
+  $('atlas-fullscreen').classList.add('open');
+  // Copy messages to fullscreen if empty
+  if ($('atlas-fullscreen-messages').children.length <= 1) {
+    const msgs = $('atlas-messages').children;
+    for (let i = 1; i < msgs.length; i++) {
+      $('atlas-fullscreen-messages').appendChild(msgs[i].cloneNode(true));
+    }
+  }
+  setTimeout(() => $('atlas-fs-input').focus(), 200);
+}
+
+function collapseAtlas() {
+  atlasFS = false;
+  $('atlas-fullscreen').classList.remove('open');
+  atlasOpen = true;
+  $('atlas-panel').classList.add('open');
+  // Copy FS messages back to panel
+  const fsMsgs = $('atlas-fullscreen-messages').children;
+  $('atlas-messages').innerHTML = '';
+  for (const m of fsMsgs) {
+    $('atlas-messages').appendChild(m.cloneNode(true));
+  }
+  setTimeout(() => $('atlas-input').focus(), 200);
+}
+
+async function sendAtlas() {
+  const input = $('atlas-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  appendAtlasMsg('user', msg, 'atlas-messages');
+  appendAtlasTyping('atlas-messages');
+  scrollAtlas('atlas-messages');
+
+  try {
+    const res = await fetchJSON('/api/assistant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg })
+    });
+    removeAtlasTyping('atlas-messages');
+    if (res && res.reply) {
+      appendAtlasMsg('assistant', res.reply, 'atlas-messages');
+    } else {
+      appendAtlasMsg('assistant', 'Sorry, I couldn\'t process that. Try again.', 'atlas-messages');
+    }
+  } catch (e) {
+    removeAtlasTyping('atlas-messages');
+    appendAtlasMsg('assistant', 'Connection error. Try again.', 'atlas-messages');
+  }
+  scrollAtlas('atlas-messages');
+}
+
+async function sendAtlasFS() {
+  const input = $('atlas-fs-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  appendAtlasMsg('user', msg, 'atlas-fullscreen-messages');
+  appendAtlasTyping('atlas-fullscreen-messages');
+  scrollAtlas('atlas-fullscreen-messages');
+
+  try {
+    const res = await fetchJSON('/api/assistant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg })
+    });
+    removeAtlasTyping('atlas-fullscreen-messages');
+    if (res && res.reply) {
+      appendAtlasMsg('assistant', res.reply, 'atlas-fullscreen-messages');
+    } else {
+      appendAtlasMsg('assistant', 'Sorry, I couldn\'t process that. Try again.', 'atlas-fullscreen-messages');
+    }
+  } catch (e) {
+    removeAtlasTyping('atlas-fullscreen-messages');
+    appendAtlasMsg('assistant', 'Connection error. Try again.', 'atlas-fullscreen-messages');
+  }
+  scrollAtlas('atlas-fullscreen-messages');
+}
+
+function appendAtlasMsg(role, text, containerId) {
+  const div = document.createElement('div');
+  div.className = 'atlas-msg ' + role;
+  if (role === 'assistant') {
+    div.innerHTML = '<div class="label">Atlas</div>' + text.replace(/\n/g, '<br>');
+  } else {
+    div.textContent = text;
+  }
+  $(containerId).appendChild(div);
+}
+
+function appendAtlasTyping(containerId) {
+  const div = document.createElement('div');
+  div.className = 'atlas-msg assistant atlas-typing-msg';
+  div.innerHTML = '<div class="atlas-typing"><span></span><span></span><span></span></div>';
+  $(containerId).appendChild(div);
+}
+
+function removeAtlasTyping(containerId) {
+  const el = $(containerId).querySelector('.atlas-typing-msg');
+  if (el) el.remove();
+}
+
+function scrollAtlas(containerId) {
+  const el = $(containerId);
+  setTimeout(() => { el.scrollTop = el.scrollHeight; }, 100);
+}
+
 // ── Init ──
 $('invoices-tab').style.display = 'none';
 $('clients-tab').style.display = 'none';
 loadDashboard();
 </script>
+
+<!-- Atlas AI Assistant -->
+<div class="atlas-bubble" id="atlas-bubble" onclick="toggleAtlas()" title="Ask Atlas">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-sparkles"/></svg>
+</div>
+
+<div class="atlas-panel" id="atlas-panel">
+  <div class="atlas-panel-header">
+    <div class="title"><span class="dot"></span> Atlas AI</div>
+    <div class="actions">
+      <button onclick="expandAtlas()" title="Fullscreen"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button>
+      <button onclick="toggleAtlas()" title="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-x"/></svg></button>
+    </div>
+  </div>
+  <div class="atlas-panel-messages" id="atlas-messages">
+    <div class="atlas-msg assistant">
+      <div class="label">Atlas</div>
+      Hey Emilio! I have full access to your business data — leads, revenue, pipeline, clients. Ask me anything. Try "How's business this month?" or "Which leads should I follow up with?"
+    </div>
+  </div>
+  <div class="atlas-panel-input">
+    <input type="text" id="atlas-input" placeholder="Ask about your business..." onkeydown="if(event.key==='Enter')sendAtlas()">
+    <button onclick="sendAtlas()">Send</button>
+  </div>
+</div>
+
+<!-- Atlas Fullscreen -->
+<div class="atlas-fullscreen" id="atlas-fullscreen">
+  <div class="atlas-fullscreen-header">
+    <div class="title"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22C55E;animation:pulse-dot 2s infinite;margin-right:8px;"></span> Atlas AI — Business Assistant</div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="collapseAtlas()" style="background:none;border:1px solid rgba(255,255,255,0.15);color:var(--text-muted);width:36px;height:36px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button>
+    </div>
+  </div>
+  <div class="atlas-fullscreen-messages" id="atlas-fullscreen-messages">
+    <div class="atlas-msg assistant">
+      <div class="label">Atlas</div>
+      Full access mode. I can see everything — ask me about leads, revenue, pipeline, clients, or what you should focus on next.
+    </div>
+  </div>
+  <div class="atlas-fullscreen-input">
+    <input type="text" id="atlas-fs-input" placeholder="Ask Atlas anything about your business..." onkeydown="if(event.key==='Enter')sendAtlasFS()">
+    <button onclick="sendAtlasFS()">Send</button>
+  </div>
+</div>
+
 </body>
 </html>"""
 
