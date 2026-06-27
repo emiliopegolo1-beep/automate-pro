@@ -1973,6 +1973,61 @@ def api_workflow_save(client_id):
     return jsonify({"success": True, "config": config})
 
 
+@app.route("/api/clients/<client_id>/workflow/test", methods=["POST"])
+def api_workflow_test(client_id):
+    """Fire a test lead through the workflow to verify everything works."""
+    if not session.get("logged_in"):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    client = get_client_by_id(client_id)
+    if not client:
+        return jsonify({"error": "Client not found"}), 404
+
+    wf = get_workflow(client_id)
+    if not wf:
+        return jsonify({"error": "No workflow configured. Save the workflow first."}), 400
+
+    test_name = "Test Lead (Automated)"
+    test_email = "test@automatepro.ai"
+    test_phone = "+61400111222"
+    test_message = "This is an automated test to verify the workflow is working correctly."
+    test_business = "Test"
+
+    # Save a test lead
+    test_lead_id = str(uuid.uuid4())[:8]
+    save_lead(test_lead_id, test_name, test_email, test_business, test_message, test_phone,
+              source=f"client:{client['slug']}", notify_email=client.get("notify_email", ""))
+
+    # Run all workflow actions
+    results = run_workflow(client["slug"], test_lead_id, test_name, test_email,
+                           test_phone, test_message, test_business)
+
+    # Format results for the dashboard
+    formatted = []
+    status = "all_green"
+    for action, result in results:
+        ok = result and result.get("success") if isinstance(result, dict) else bool(result)
+        icon = "✅" if ok else "❌"
+        if not ok:
+            status = "has_errors"
+        detail = ""
+        if action == "sms":
+            detail = f"SMS to {wf.get('sms_number', 'N/A')}"
+            if ok:
+                detail += f" (SID: {result.get('sid', 'N/A')})"
+            else:
+                detail += f" — {result.get('error', 'Failed')}"
+        elif action == "email_sequence":
+            detail = f"Follow-ups scheduled at {wf.get('email_delay_hours', 'N/A')} hours"
+        elif action == "webhook":
+            detail = f"POST to {wf.get('webhook_url', 'N/A')} — HTTP {result.get('status', '?')}"
+        elif action == "sheet":
+            detail = "Row append attempted"
+        formatted.append({"action": action, "icon": icon, "detail": detail, "ok": ok})
+
+    return jsonify({"success": True, "status": status, "results": formatted})
+
+
 def get_client_portal_leads(client_id):
     source_prefix = f"client:{client_id}"
     conn = get_db()
@@ -4175,9 +4230,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     <div class="btn-row">
       <button class="btn btn-accent" onclick="saveWorkflow()">Save Workflow</button>
+      <button class="btn" onclick="testWorkflow()" style="background:var(--blue);color:#fff;border:none;">🧪 Test Workflow</button>
       <button class="btn btn-outline" onclick="closeWorkflowModal()">Cancel</button>
     </div>
     <div id="workflow-result" class="email-result"></div>
+    <div id="workflow-test-results" style="margin-top:12px;"></div>
   </div>
 </div>
 
@@ -5401,6 +5458,28 @@ async function saveWorkflow() {
     $('workflow-result').className = 'email-result error';
     $('workflow-result').textContent = 'Failed to save workflow';
   }
+}
+
+async function testWorkflow() {
+  const clientId = $('wf-client-id').value;
+  const resultDiv = $('workflow-test-results');
+  resultDiv.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">⏳ Running test lead through workflow...</div>';
+
+  const res = await fetchJSON('/api/clients/' + clientId + '/workflow/test', { method: 'POST' });
+
+  if (!res || !res.success) {
+    resultDiv.innerHTML = '<div style="color:var(--red);font-size:13px;">❌ ' + (res ? res.error : 'Test failed') + '</div>';
+    return;
+  }
+
+  const statusColor = res.status === 'all_green' ? 'var(--green)' : 'var(--yellow)';
+  let html = '<div style="font-size:13px;margin-top:8px;">';
+  html += '<div style="font-weight:600;color:' + statusColor + ';margin-bottom:8px;">Test Results:</div>';
+  for (const r of res.results) {
+    html += '<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);">' + r.icon + ' <strong>' + r.action + '</strong>: ' + r.detail + '</div>';
+  }
+  html += '</div>';
+  resultDiv.innerHTML = html;
 }
 
 function genPassword() {
