@@ -5188,7 +5188,7 @@ function appendAtlasMsg(role, text, containerId) {
   const div = document.createElement('div');
   div.className = 'atlas-msg ' + role;
   if (role === 'assistant') {
-    div.innerHTML = '<div class="label">Atlas</div>' + text.replace(/\n/g, '<br>');
+    div.innerHTML = '<div class="label">Atlas</div>' + text.replace(/\\n/g, '<br>');
   } else {
     div.textContent = text;
   }
