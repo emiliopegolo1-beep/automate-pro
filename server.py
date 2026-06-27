@@ -2,6 +2,14 @@
 """Automate Pro — Lead Capture & Admin Dashboard Server."""
 import os
 import sys
+import socket as _socket
+
+# ── IPv4-only patching (Render Free blocks IPv6) ──
+_orig_getaddrinfo = _socket.getaddrinfo
+def _ipv4_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    return _orig_getaddrinfo(host, port, _socket.AF_INET, type, proto, flags)
+_socket.getaddrinfo = _ipv4_getaddrinfo
+
 import psycopg2
 import psycopg2.extras
 import uuid
@@ -144,12 +152,10 @@ def get_db():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL environment variable not set")
     dsn = DATABASE_URL.strip()
-    # Use Supabase PgBouncer pooler (port 6543) — works on Render Free tier
-    dsn = dsn.replace(":5432", ":6543").replace("/postgres", "/postgres", 1)
     if "sslmode" not in dsn and "postgresql" in dsn:
         separator = "?" if "?" not in dsn else "&"
         dsn = f"{dsn}{separator}sslmode=require"
-    conn = psycopg2.connect(dsn)
+    conn = psycopg2.connect(dsn, connect_timeout=10)
     conn.cursor_factory = psycopg2.extras.RealDictCursor
     return conn
 
