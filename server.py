@@ -2,8 +2,7 @@
 """Automate Pro — Lead Capture & Admin Dashboard Server."""
 import os
 import sys
-import psycopg2
-import psycopg2.extras
+import sqlite3
 import uuid
 import functools
 from datetime import datetime, date, timedelta
@@ -88,10 +87,10 @@ def send_email_sync(to, subject, body):
 app = Flask(__name__)
 app.secret_key = os.urandom(32).hex()
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-NOTIFY_EMAIL = os.environ.get("NOTIFY_EMAIL", "emilio.pegolo1@gmail.com")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "leads.db")
+NOTIFY_EMAIL = "emilio.pegolo1@gmail.com"
 DASHBOARD_PASSWORD = "automate2026"
-DOMAIN = os.environ.get("DOMAIN", "automate-pro-production.up.railway.app")
+DOMAIN = "automate-pro-production.up.railway.app"
 
 CLIENT_CREDENTIALS = {
     "bob": {"name": "Bob's Plumbing", "password": "plumb2026", "notify_email": "bob@bobsplumbing.com"},
@@ -141,37 +140,15 @@ def create_test_products():
 
 
 def get_db():
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL environment variable not set")
-    dsn = DATABASE_URL.strip()
-    import re as _re, socket as _sock, urllib.parse as _up
-    parsed = _up.urlparse(dsn)
-    hostname = parsed.hostname or ""
-    port = str(parsed.port or 5432)
-    user = parsed.username or "postgres"
-    pwd = parsed.password or ""
-    dbname = parsed.path.lstrip("/") or "postgres"
-    # Render Free blocks IPv6; route through pooler with IPv4 + SNI
-    if "pooler.supabase.com" not in hostname:
-        try:
-            pooler_ip = _sock.gethostbyname("aws-0-ap-southeast-1.pooler.supabase.com")
-            dsn = f"postgresql://{user}:{pwd}@{pooler_ip}:{port}/{dbname}?sslmode=require&host={hostname}"
-        except Exception:
-            if "sslmode" not in dsn:
-                dsn += "&sslmode=require" if "?" in dsn else "?sslmode=require"
-    elif "sslmode" not in dsn:
-        dsn += "&sslmode=require" if "?" in dsn else "?sslmode=require"
-    conn = psycopg2.connect(dsn, connect_timeout=30)
-    conn.cursor_factory = psycopg2.extras.RealDictCursor
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
 def init_db():
-    """Create tables if they don't exist. Safe to run multiple times."""
     conn = get_db()
-    cur = conn.cursor()
-
-    cur.execute(
+    conn.execute(
         """
         CREATE TABLE IF NOT EXISTS leads (
             id TEXT PRIMARY KEY,
@@ -185,18 +162,39 @@ def init_db():
             revenue REAL DEFAULT 0,
             auto_responded INTEGER DEFAULT 0,
             notified INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW(),
-            requirements TEXT DEFAULT '',
-            quoted_price REAL DEFAULT 0,
-            follow_up_date TEXT DEFAULT '',
-            source TEXT DEFAULT 'automate_pro',
-            notify_email TEXT DEFAULT ''
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
     )
+    # Safely add columns that may not exist on older databases
+    columns_to_add = [
+        ("phone", "TEXT DEFAULT ''"),
+        ("status", "TEXT DEFAULT 'new'"),
+        ("notes", "TEXT DEFAULT ''"),
+        ("revenue", "REAL DEFAULT 0"),
+        ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+        ("requirements", "TEXT DEFAULT ''"),
+        ("quoted_price", "REAL DEFAULT 0"),
+        ("follow_up_date", "TEXT DEFAULT ''"),
+        ("source", "TEXT DEFAULT 'automate_pro'"),
+    ]
+    extra_client_cols = [
+        ("notify_email", "TEXT DEFAULT ''"),
+    ]
+    for col_name, col_def in extra_client_cols:
+        try:
+            conn.execute(f"ALTER TABLE leads ADD COLUMN {col_name} {col_def}")
+        except sqlite3.OperationalError:
+            pass
+    for col_name, col_def in columns_to_add:
+        try:
+            conn.execute(f"ALTER TABLE leads ADD COLUMN {col_name} {col_def}")
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
-    cur.execute(
+    # Payments table
+    conn.execute(
         """
         CREATE TABLE IF NOT EXISTS payments (
             id TEXT PRIMARY KEY,
@@ -208,12 +206,13 @@ def init_db():
             payment_type TEXT,
             status TEXT,
             customer_email TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT NOW()
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
     )
 
-    cur.execute(
+    # Invoices table — one-time + subscription support
+    conn.execute(
         """
         CREATE TABLE IF NOT EXISTS invoices (
             id TEXT PRIMARY KEY,
@@ -225,7 +224,7 @@ def init_db():
             status TEXT DEFAULT 'draft',
             due_date TEXT,
             invoice_number TEXT UNIQUE,
-            created_at TIMESTAMP DEFAULT NOW(),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             paid_at TIMESTAMP,
             has_subscription INTEGER DEFAULT 0,
             sub_amount REAL DEFAULT 0,
@@ -236,37 +235,40 @@ def init_db():
         )
     """
     )
+    # Safe migration: add subscription columns if missing
+    sub_cols = [
+        ("has_subscription", "INTEGER DEFAULT 0"),
+        ("sub_amount", "REAL DEFAULT 0"),
+        ("sub_interval", "TEXT DEFAULT 'month'"),
+        ("sub_description", "TEXT DEFAULT ''"),
+        ("stripe_subscription_id", "TEXT DEFAULT ''"),
+        ("sub_status", "TEXT DEFAULT 'none'"),
+    ]
+    for col_name, col_def in sub_cols:
+        try:
+            conn.execute(f"ALTER TABLE invoices ADD COLUMN {col_name} {col_def}")
+        except sqlite3.OperationalError:
+            pass
 
     conn.commit()
-    cur.close()
     conn.close()
-
-
-def _execute(conn, sql, params=None):
-    """Run a SQL statement and return the cursor. Auto-commits for INSERT/UPDATE/DELETE."""
-    cur = conn.cursor()
-    cur.execute(sql, params)
-    conn.commit()
-    return cur
 
 
 def save_lead(lead_id, name, email, business_type, message, phone="", source="", notify_email=""):
     conn = get_db()
-    cur = conn.cursor()
     if not source:
         source = "automate_pro"
-    _execute(conn,
-        "INSERT INTO leads (id, name, email, business_type, message, phone, source, notify_email) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+    conn.execute(
+        "INSERT INTO leads (id, name, email, business_type, message, phone, source, notify_email) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (lead_id, name, email, business_type, message, phone, source, notify_email),
     )
+    conn.commit()
     conn.close()
 
 
 def get_lead_by_id(lead_id):
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM leads WHERE id = %s", (lead_id,))
-    row = cur.fetchone()
+    row = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -278,26 +280,26 @@ def update_lead_in_db(lead_id, updates):
     if not filtered:
         return False
     filtered["updated_at"] = datetime.now().isoformat()
-    set_clause = ", ".join(f"{k} = %s" for k in filtered)
+    set_clause = ", ".join(f"{k} = ?" for k in filtered)
     values = list(filtered.values()) + [lead_id]
     conn = get_db()
-    cur = conn.cursor()
-    _execute(conn, f"UPDATE leads SET {set_clause} WHERE id = %s", values)
+    conn.execute(f"UPDATE leads SET {set_clause} WHERE id = ?", values)
+    conn.commit()
     conn.close()
     return True
 
 
 def mark_auto_responded(lead_id):
     conn = get_db()
-    cur = conn.cursor()
-    _execute(conn, "UPDATE leads SET auto_responded = 1 WHERE id = %s", (lead_id,))
+    conn.execute("UPDATE leads SET auto_responded = 1 WHERE id = ?", (lead_id,))
+    conn.commit()
     conn.close()
 
 
 def mark_notified(lead_id):
     conn = get_db()
-    cur = conn.cursor()
-    _execute(conn, "UPDATE leads SET notified = 1 WHERE id = %s", (lead_id,))
+    conn.execute("UPDATE leads SET notified = 1 WHERE id = ?", (lead_id,))
+    conn.commit()
     conn.close()
 
 
@@ -337,9 +339,7 @@ import string
 def generate_invoice_number():
     """Generate next sequential invoice number (INV-0001 format)."""
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT invoice_number FROM invoices ORDER BY invoice_number DESC LIMIT 1")
-    row = cur.fetchone()
+    row = conn.execute("SELECT invoice_number FROM invoices ORDER BY invoice_number DESC LIMIT 1").fetchone()
     conn.close()
     if row and row["invoice_number"]:
         try:
@@ -352,9 +352,7 @@ def generate_invoice_number():
 
 def get_invoice_by_id(invoice_id):
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM invoices WHERE id = %s", (invoice_id,))
-    row = cur.fetchone()
+    row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -492,13 +490,6 @@ def api_chat():
 
 @app.route("/api/lead", methods=["POST"])
 def api_lead():
-    import traceback as _tb
-    try:
-        return _api_lead_impl()
-    except Exception as _e:
-        return jsonify({"error": str(_e), "traceback": _tb.format_exc()}), 500
-
-def _api_lead_impl():
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
@@ -581,8 +572,7 @@ def _api_lead_impl():
 @app.route("/api/leads", methods=["GET"])
 def api_leads():
     conn = get_db()
-    cur = conn.cursor()
-    rows = cur.execute("SELECT * FROM leads ORDER BY created_at DESC").fetchall()
+    rows = conn.execute("SELECT * FROM leads ORDER BY created_at DESC").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -594,7 +584,6 @@ def api_leads():
 @login_required
 def api_dashboard():
     conn = get_db()
-    cur = conn.cursor()
     include_all = request.args.get("include_all", "false").lower() == "true"
 
     source_filter = ""
@@ -602,7 +591,10 @@ def api_dashboard():
         source_filter = "WHERE source = 'automate_pro'"
 
     # Total leads
-    status_rows = cur.execute(
+    total_leads = conn.execute(f"SELECT COUNT(*) FROM leads {source_filter}").fetchone()[0]
+
+    # Leads by status
+    status_rows = conn.execute(
         f"SELECT status, COUNT(*) as cnt FROM leads {source_filter} GROUP BY status"
     ).fetchall()
     leads_by_status = {r["status"]: r["cnt"] for r in status_rows}
@@ -610,22 +602,22 @@ def api_dashboard():
         leads_by_status.setdefault(s, 0)
 
     # Revenue totals (from payments table)
-    total_revenue = cur.execute(
+    total_revenue = conn.execute(
         "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'completed'"
     ).fetchone()[0]
 
     # Revenue this month
     first_of_month = date.today().replace(day=1).isoformat()
-    revenue_this_month = cur.execute(
-        "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'completed' AND created_at >= %s",
+    revenue_this_month = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'completed' AND created_at >= ?",
         (first_of_month,),
     ).fetchone()[0]
 
     # New this week
     week_ago = (date.today() - timedelta(days=7)).isoformat()
     source_clause_week = "" if include_all else "AND source = 'automate_pro'"
-    new_this_week = cur.execute(
-        f"SELECT COUNT(*) FROM leads WHERE created_at >= %s {source_clause_week}", (week_ago,)
+    new_this_week = conn.execute(
+        f"SELECT COUNT(*) FROM leads WHERE created_at >= ? {source_clause_week}", (week_ago,)
     ).fetchone()[0]
 
     # Conversion rate (delivered+paid / touched leads)
@@ -641,7 +633,7 @@ def api_dashboard():
         conversion_rate = round((total_won / denominator) * 100, 1)
 
     # Recent leads (last 5)
-    recent = cur.execute(
+    recent = conn.execute(
         f"SELECT * FROM leads {source_filter} ORDER BY created_at DESC LIMIT 5"
     ).fetchall()
 
@@ -1103,9 +1095,8 @@ loadLeads();
 def get_client_portal_leads(client_id):
     source_prefix = f"client:{client_id}"
     conn = get_db()
-    cur = conn.cursor()
-    rows = cur.execute(
-        "SELECT * FROM leads WHERE source = %s ORDER BY created_at DESC",
+    rows = conn.execute(
+        "SELECT * FROM leads WHERE source = ? ORDER BY created_at DESC",
         (source_prefix,),
     ).fetchall()
     conn.close()
@@ -1194,8 +1185,7 @@ def dashboard_page():
 @login_required
 def api_list_invoices():
     conn = get_db()
-    cur = conn.cursor()
-    rows = cur.execute("SELECT * FROM invoices ORDER BY created_at DESC").fetchall()
+    rows = conn.execute("SELECT * FROM invoices ORDER BY created_at DESC").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -1242,12 +1232,11 @@ def api_create_invoice():
     invoice_number = generate_invoice_number()
 
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
+    conn.execute(
         """INSERT INTO invoices
            (id, lead_id, client_name, client_email, amount, description, due_date, invoice_number,
             has_subscription, sub_amount, sub_interval, sub_description)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (invoice_id, lead_id, client_name, client_email, amount, description, due_date, invoice_number,
          1 if has_sub else 0, sub_amount, sub_interval, sub_description),
     )
@@ -1290,12 +1279,11 @@ def api_update_invoice(invoice_id):
     if updates.get("status") == "paid" and not inv.get("paid_at"):
         updates["paid_at"] = datetime.now().isoformat()
 
-    set_clause = ", ".join(f"{k} = %s" for k in updates)
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
     values = list(updates.values()) + [invoice_id]
 
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"UPDATE invoices SET {set_clause} WHERE id = %s", values)
+    conn.execute(f"UPDATE invoices SET {set_clause} WHERE id = ?", values)
     conn.commit()
     conn.close()
 
@@ -1366,9 +1354,8 @@ def api_send_invoice(invoice_id):
     body = build_invoice_email_body(inv, stripe_url, sub_stripe_url)
     
     conn = get_db()
-    cur = conn.cursor()
     if (stripe_url or sub_stripe_url) and inv["status"] == "draft":
-        cur.execute("UPDATE invoices SET status = %s WHERE id = %s", ("sent", invoice_id))
+        conn.execute("UPDATE invoices SET status = ? WHERE id = ?", ("sent", invoice_id))
 
     result = send_email(inv["client_email"], subject, body)
     conn.commit()
@@ -1409,9 +1396,8 @@ def api_cancel_subscription(invoice_id):
 
     # Mark subscription as cancelled in DB
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE invoices SET sub_status = %s WHERE id = %s",
+    conn.execute(
+        "UPDATE invoices SET sub_status = ? WHERE id = ?",
         ("cancelled", invoice_id),
     )
     conn.commit()
@@ -1568,10 +1554,9 @@ def api_calendly_webhook():
             
             if email:
                 conn = get_db()
-                cur = conn.cursor()
                 # Find the lead by email
-                lead = cur.execute(
-                    "SELECT id, status FROM leads WHERE email = %s ORDER BY created_at DESC LIMIT 1",
+                lead = conn.execute(
+                    "SELECT id, status FROM leads WHERE email = ? ORDER BY created_at DESC LIMIT 1",
                     (email,)
                 ).fetchone()
                 
@@ -1580,14 +1565,14 @@ def api_calendly_webhook():
                         new_status = "call_scheduled"
                         # Format the follow-up date from the start_time
                         follow_up = start_time[:10] if start_time else ""
-                        cur.execute(
-                            "UPDATE leads SET status = %s, follow_up_date = %s WHERE id = %s",
+                        conn.execute(
+                            "UPDATE leads SET status = ?, follow_up_date = ? WHERE id = ?",
                             (new_status, follow_up, lead[0])
                         )
                         conn.commit()
                     elif "invitee.canceled" in event_type:
-                        cur.execute(
-                            "UPDATE leads SET status = 'new' WHERE id = %s AND status = 'call_scheduled'",
+                        conn.execute(
+                            "UPDATE leads SET status = 'new' WHERE id = ? AND status = 'call_scheduled'",
                             (lead[0],)
                         )
                         conn.commit()
@@ -1648,28 +1633,27 @@ def handle_checkout_completed(session_data):
     if invoice_id:
         payment_type = metadata.get("payment_type", "setup")
         conn = get_db()
-        cur = conn.cursor()
         
         if payment_type == "setup":
-            cur.execute("UPDATE invoices SET status = 'paid', paid_at = NOW() WHERE id = %s", (invoice_id,))
+            conn.execute("UPDATE invoices SET status = 'paid', paid_at = datetime('now') WHERE id = ?", (invoice_id,))
         elif payment_type == "subscription":
             # Save the subscription ID from the checkout session
             sub_id = session_data.get("subscription", "")
             if sub_id and isinstance(sub_id, str):
-                cur.execute(
-                    "UPDATE invoices SET stripe_subscription_id = %s, sub_status = 'active' WHERE id = %s",
+                conn.execute(
+                    "UPDATE invoices SET stripe_subscription_id = ?, sub_status = 'active' WHERE id = ?",
                     (sub_id, invoice_id),
                 )
             elif isinstance(sub_id, dict):
                 sid = sub_id.get("id", "")
                 if sid:
-                    cur.execute(
-                        "UPDATE invoices SET stripe_subscription_id = %s, sub_status = 'active' WHERE id = %s",
+                    conn.execute(
+                        "UPDATE invoices SET stripe_subscription_id = ?, sub_status = 'active' WHERE id = ?",
                         (sid, invoice_id),
                     )
         
         conn.commit()
-        inv = cur.execute("SELECT * FROM invoices WHERE id = %s", (invoice_id,)).fetchone()
+        inv = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
         conn.close()
         if inv:
             if payment_type == "setup":
@@ -1691,11 +1675,10 @@ def handle_checkout_completed(session_data):
 
     payment_id = str(uuid.uuid4())[:8]
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
+    conn.execute(
         """INSERT INTO payments
            (id, lead_id, stripe_session_id, amount, currency, plan_name, payment_type, status, customer_email)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             payment_id,
             lead_id,
@@ -1711,8 +1694,8 @@ def handle_checkout_completed(session_data):
 
     # If there's a lead_id, update the lead status to paid and set revenue
     if lead_id:
-        cur.execute(
-            "UPDATE leads SET status = 'paid', revenue = COALESCE(revenue, 0) + %s WHERE id = %s",
+        conn.execute(
+            "UPDATE leads SET status = 'paid', revenue = COALESCE(revenue, 0) + ? WHERE id = ?",
             (amount_total, lead_id),
         )
 
@@ -1748,17 +1731,16 @@ def handle_subscription_deleted(sub_data):
         return
     # Find the invoice with this subscription ID
     conn = get_db()
-    cur = conn.cursor()
     try:
         # Check if column exists first
-        inv = cur.execute(
-            "SELECT * FROM invoices WHERE stripe_subscription_id = %s AND has_subscription = 1",
+        inv = conn.execute(
+            "SELECT * FROM invoices WHERE stripe_subscription_id = ? AND has_subscription = 1",
             (sub_id,),
         ).fetchone()
         if inv:
             inv_dict = dict(inv)
-            cur.execute(
-                "UPDATE invoices SET sub_status = 'cancelled' WHERE stripe_subscription_id = %s",
+            conn.execute(
+                "UPDATE invoices SET sub_status = 'cancelled' WHERE stripe_subscription_id = ?",
                 (sub_id,),
             )
             conn.commit()
@@ -1788,10 +1770,9 @@ def handle_subscription_payment(inv_data):
     if not sub_id:
         return
     conn = get_db()
-    cur = conn.cursor()
     try:
-        inv = cur.execute(
-            "SELECT * FROM invoices WHERE stripe_subscription_id = %s AND has_subscription = 1",
+        inv = conn.execute(
+            "SELECT * FROM invoices WHERE stripe_subscription_id = ? AND has_subscription = 1",
             (sub_id,),
         ).fetchone()
         if inv:
@@ -1811,10 +1792,9 @@ def checkout_success():
     if invoice_id:
         try:
             conn = get_db()
-            cur = conn.cursor()
-            cur.execute("UPDATE invoices SET status = 'paid', paid_at = NOW() WHERE id = %s AND status != 'paid'", (invoice_id,))
+            conn.execute("UPDATE invoices SET status = 'paid', paid_at = datetime('now') WHERE id = ? AND status != 'paid'", (invoice_id,))
             conn.commit()
-            inv = cur.execute("SELECT * FROM invoices WHERE id = %s", (invoice_id,)).fetchone()
+            inv = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
             conn.close()
             if inv:
                 paid_name = inv[2]
@@ -4887,11 +4867,7 @@ def plumber_demo():
 
 
 # Run DB init at import time (gunicorn doesn't run __main__)
-try:
-    init_db()
-    print("[INIT] Database tables ready")
-except Exception as e:
-    print(f"[INIT] Database init failed (will retry on first request): {e}")
+init_db()
 
 # ── React SPA catch-all (must be LAST route) ──────────────────────────────
 
