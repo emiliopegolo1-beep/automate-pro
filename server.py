@@ -506,6 +506,29 @@ def init_db():
             (bob_id, "Bob's Plumbing", "bob", "plumb2026", "bob@bobsplumbing.com", "test"),
         )
 
+    # ── Workflow configs table ──
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_configs (
+            id TEXT PRIMARY KEY,
+            client_id TEXT NOT NULL UNIQUE,
+            sms_enabled INTEGER DEFAULT 0,
+            sms_number TEXT DEFAULT '',
+            sms_message TEXT DEFAULT 'New lead: {name}, {phone} — {message}',
+            email_sequence_enabled INTEGER DEFAULT 0,
+            email_delay_hours TEXT DEFAULT '0,72,168',
+            webhook_enabled INTEGER DEFAULT 0,
+            webhook_url TEXT DEFAULT '',
+            webhook_secret TEXT DEFAULT '',
+            sheet_id TEXT DEFAULT '',
+            sheet_enabled INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+        )
+    """
+    )
+
     conn.commit()
     conn.close()
 
@@ -998,6 +1021,178 @@ def api_assistant():
         return jsonify({"reply": "I couldn't process that right now. Try again in a moment."}), 500
 
 
+def get_workflow(client_id):
+    """Get workflow config for a client. Returns dict or None."""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM workflow_configs WHERE client_id = ?", (client_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def save_workflow(client_id, config):
+    """Insert or update workflow config for a client."""
+    conn = get_db()
+    existing = conn.execute("SELECT id FROM workflow_configs WHERE client_id = ?", (client_id,)).fetchone()
+    if existing:
+        sets = ", ".join(f"{k}=?" for k in config.keys())
+        values = list(config.values()) + [client_id]
+        conn.execute(
+            f"UPDATE workflow_configs SET {sets}, updated_at=CURRENT_TIMESTAMP WHERE client_id=?",
+            tuple(values),
+        )
+    else:
+        config["client_id"] = client_id
+        config["id"] = str(uuid.uuid4())[:8]
+        cols = ", ".join(config.keys())
+        placeholders = ", ".join("?" * len(config))
+        conn.execute(
+            f"INSERT INTO workflow_configs ({cols}) VALUES ({placeholders})",
+            tuple(config.values()),
+        )
+    conn.commit()
+    conn.close()
+
+def run_workflow(client_slug, lead_id, lead_name, lead_email, lead_phone, lead_message, business_type):
+    """Fire all enabled workflow actions for a client's new lead."""
+    client = get_client_by_slug(client_slug)
+    if not client:
+        return
+
+    wf = get_workflow(client["id"])
+    if not wf:
+        return  # No workflow configured
+
+    results = []
+
+    # 1. SMS via Twilio
+    if wf.get("sms_enabled") and wf.get("sms_number"):
+        sms_body = (wf.get("sms_message") or "New lead: {name}, {phone}").format(
+            name=lead_name, email=lead_email, phone=lead_phone or "N/A",
+            message=lead_message or "", business=business_type or "N/A"
+        )
+        sms_result = send_twilio_sms(wf["sms_number"], sms_body)
+        results.append(("sms", sms_result))
+
+    # 2. Email sequence (mark first email time)
+    if wf.get("email_sequence_enabled"):
+        save_email_sequence_jobs(lead_id, client_slug, wf)
+        results.append(("email_sequence", "scheduled"))
+
+    # 3. Webhook
+    if wf.get("webhook_enabled") and wf.get("webhook_url"):
+        wh_result = fire_webhook(wf["webhook_url"], wf.get("webhook_secret", ""), {
+            "event": "new_lead",
+            "client": client_slug,
+            "lead_id": lead_id,
+            "name": lead_name,
+            "email": lead_email,
+            "phone": lead_phone,
+            "message": lead_message,
+            "business_type": business_type,
+        })
+        results.append(("webhook", wh_result))
+
+    # 4. Google Sheets
+    if wf.get("sheet_enabled") and wf.get("sheet_id"):
+        sheet_result = append_to_sheet(wf["sheet_id"], {
+            "name": lead_name, "email": lead_email, "phone": lead_phone or "",
+            "message": lead_message or "", "business_type": business_type or "",
+            "source": f"client:{client_slug}",
+        })
+        results.append(("sheet", sheet_result))
+
+    print(f"[Workflow] {client_slug}: {results}")
+    return results
+
+
+# ── Twilio SMS ──
+import urllib.parse as _urlparse
+
+TWILIO_SID = os.environ.get("TWILIO_SID", "")
+TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM = os.environ.get("TWILIO_PHONE", "")
+
+def send_twilio_sms(to_number, body):
+    """Send SMS via Twilio REST API."""
+    if not TWILIO_SID or not TWILIO_TOKEN:
+        return {"success": False, "error": "Twilio not configured"}
+    try:
+        data = _urlparse.urlencode({
+            "To": to_number,
+            "From": TWILIO_FROM,
+            "Body": body[:1600],
+        }).encode()
+        req = urllib.request.Request(
+            f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_SID}/Messages.json",
+            data=data,
+            headers={},
+        )
+        auth = base64.b64encode(f"{TWILIO_SID}:{TWILIO_TOKEN}".encode()).decode()
+        req.add_header("Authorization", f"Basic {auth}")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+            return {"success": True, "sid": result.get("sid", "")}
+    except Exception as e:
+        print(f"[Twilio] Error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# ── Email Sequences ──
+
+def save_email_sequence_jobs(lead_id, client_slug, wf):
+    """Record that an email sequence was triggered for this lead."""
+    delays_str = wf.get("email_delay_hours", "0,72,168")
+    try:
+        delays = [int(h.strip()) for h in delays_str.split(",") if h.strip()]
+    except ValueError:
+        delays = [0]
+
+    conn = get_db()
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS email_jobs (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT,
+            client_id TEXT,
+            delay_hours INTEGER,
+            sent INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    for delay in delays:
+        conn.execute(
+            "INSERT INTO email_jobs (id, lead_id, client_id, delay_hours) VALUES (?, ?, ?, ?)",
+            (str(uuid.uuid4())[:8], lead_id, client_slug, delay),
+        )
+    conn.commit()
+    conn.close()
+    print(f"[EmailSeq] {client_slug}: {len(delays)} emails scheduled for lead {lead_id}")
+
+
+# ── Webhooks ──
+
+def fire_webhook(url, secret, payload):
+    """POST JSON payload to a webhook URL."""
+    try:
+        body = json.dumps(payload).encode()
+        req = urllib.request.Request(url, data=body, headers={
+            "Content-Type": "application/json",
+            "X-Webhook-Secret": secret or "",
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return {"success": True, "status": resp.status}
+    except Exception as e:
+        print(f"[Webhook] Error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# ── Google Sheets ──
+
+def append_to_sheet(sheet_id, row_data):
+    """Append a row to a Google Sheet. Requires a Google Sheets setup.
+    For now this is a placeholder — returns not-configured until Google auth is set up."""
+    print(f"[Sheet] Append to {sheet_id}: {row_data}")
+    return {"success": False, "error": "Sheets integration pending — add Google service account"}
+
+
 @app.route("/api/lead", methods=["POST"])
 def api_lead():
     data = request.get_json(silent=True)
@@ -1085,6 +1280,14 @@ def api_lead():
     response = {"success": True, "lead_id": lead_id, "name": name}
     if gmail_errors:
         response["gmail_warnings"] = gmail_errors
+
+    # ── Fire workflow engine ──
+    if matched_client_id:
+        try:
+            wf_results = run_workflow(matched_client_id, lead_id, name, email, phone, message, business_type)
+            response["workflow"] = wf_results
+        except Exception as e:
+            print(f"[Workflow] Error running workflow for {matched_client_id}: {e}")
 
     return jsonify(response), 201
 
@@ -1734,6 +1937,40 @@ def api_clients_stripe(client_id):
         "monthly_price_id": monthly_price_id,
         "errors": errors,
     })
+
+
+@app.route("/api/clients/<client_id>/workflow", methods=["GET"])
+def api_workflow_get(client_id):
+    """Get workflow config for a client."""
+    if not session.get("logged_in"):
+        return jsonify({"error": "Unauthorized"}), 401
+    wf = get_workflow(client_id)
+    return jsonify(wf or {"client_id": client_id})
+
+
+@app.route("/api/clients/<client_id>/workflow", methods=["POST"])
+def api_workflow_save(client_id):
+    """Save workflow config for a client."""
+    if not session.get("logged_in"):
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    config = {
+        "sms_enabled": int(data.get("sms_enabled", False)),
+        "sms_number": (data.get("sms_number") or "").strip(),
+        "sms_message": (data.get("sms_message") or "New lead: {name}, {phone} — {message}").strip(),
+        "email_sequence_enabled": int(data.get("email_sequence_enabled", False)),
+        "email_delay_hours": (data.get("email_delay_hours") or "0,72,168").strip(),
+        "webhook_enabled": int(data.get("webhook_enabled", False)),
+        "webhook_url": (data.get("webhook_url") or "").strip(),
+        "webhook_secret": (data.get("webhook_secret") or "").strip(),
+        "sheet_enabled": int(data.get("sheet_enabled", False)),
+        "sheet_id": (data.get("sheet_id") or "").strip(),
+    }
+    save_workflow(client_id, config)
+    return jsonify({"success": True, "config": config})
 
 
 def get_client_portal_leads(client_id):
@@ -3871,6 +4108,79 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
   </div>
 
+<!-- Workflow Config Modal -->
+<div class="modal-overlay" id="workflow-modal">
+  <div class="modal" style="max-width:540px;">
+    <button class="close-btn" onclick="closeWorkflowModal()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-x"/></svg>
+    </button>
+    <h3 id="wf-modal-title">Workflow Automation</h3>
+    <div class="modal-sub">Configure what happens when a new lead comes in for this client</div>
+
+    <input type="hidden" id="wf-client-id">
+
+    <!-- SMS -->
+    <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-mail"/></svg>
+      SMS Alert
+      <label class="toggle-switch" style="margin-left:auto;">
+        <input type="checkbox" id="wf-sms-enabled" onchange="$('wf-sms-fields').style.display=this.checked?'block':'none'">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div id="wf-sms-fields" style="display:none;">
+      <div class="form-group"><label>Phone Number (with country code)</label><input type="text" id="wf-sms-number" placeholder="+61400111222"></div>
+      <div class="form-group"><label>SMS Message Template</label><textarea id="wf-sms-msg" rows="2">New lead: {name}, {phone} — {message}</textarea><small style="color:var(--text-muted);">Use {'{name}'}, {'{phone}'}, {'{message}'}, {'{business}'}, {'{email}'}</small></div>
+    </div>
+
+    <!-- Email Sequence -->
+    <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;display:flex;align-items:center;gap:6px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-refresh"/></svg>
+      Email Follow-up Sequence
+      <label class="toggle-switch" style="margin-left:auto;">
+        <input type="checkbox" id="wf-email-enabled" onchange="$('wf-email-fields').style.display=this.checked?'block':'none'">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div id="wf-email-fields" style="display:none;">
+      <div class="form-group"><label>Delay Hours (comma-separated)</label><input type="text" id="wf-email-delays" value="0,72,168"><small style="color:var(--text-muted);">0 = instant, 72 = 3 days, 168 = 7 days</small></div>
+    </div>
+
+    <!-- Webhook -->
+    <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;display:flex;align-items:center;gap:6px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-link"/></svg>
+      Webhook (n8n / Zapier)
+      <label class="toggle-switch" style="margin-left:auto;">
+        <input type="checkbox" id="wf-webhook-enabled" onchange="$('wf-webhook-fields').style.display=this.checked?'block':'none'">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div id="wf-webhook-fields" style="display:none;">
+      <div class="form-group"><label>Webhook URL</label><input type="text" id="wf-webhook-url" placeholder="https://your-n8n.ondigitalocean.app/webhook/lead"></div>
+      <div class="form-group"><label>Secret (optional)</label><input type="text" id="wf-webhook-secret" placeholder="Shared secret for verification"></div>
+    </div>
+
+    <!-- Google Sheets -->
+    <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 12px;display:flex;align-items:center;gap:6px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-clipboard"/></svg>
+      Google Sheets Logging
+      <label class="toggle-switch" style="margin-left:auto;">
+        <input type="checkbox" id="wf-sheet-enabled" onchange="$('wf-sheet-fields').style.display=this.checked?'block':'none'">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div id="wf-sheet-fields" style="display:none;">
+      <div class="form-group"><label>Google Sheet ID</label><input type="text" id="wf-sheet-id" placeholder="1ABCxyz..."><small style="color:var(--text-muted);">From the sheet URL: docs.google.com/spreadsheets/d/<b>SHEET_ID</b>/edit</small></div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-accent" onclick="saveWorkflow()">Save Workflow</button>
+      <button class="btn btn-outline" onclick="closeWorkflowModal()">Cancel</button>
+    </div>
+    <div id="workflow-result" class="email-result"></div>
+  </div>
+</div>
+
 <!-- Create Invoice Modal -->
 <div class="modal-overlay" id="create-invoice-modal">
   <div class="modal">
@@ -4962,7 +5272,7 @@ async function loadClients() {
       <td><span class="badge ${statusClass}">${c.status}</span></td>
       <td class="actions">
         <button class="btn-sm" onclick="openClientModal('${c.id}')" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-edit"/></svg></button>
-        <button class="btn-sm" onclick="generateStripe('${c.id}')" title="Generate Stripe Prices" style="${c.setup_amount > 0 || c.monthly_amount > 0 ? '' : 'opacity:0.3'}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-dollar"/></svg></button>
+        <button class="btn-sm" onclick="openWorkflowModal('${c.id}','${esc(c.name).replace(/"/g,'&quot;')}')" title="Workflow"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-wrench"/></svg></button>
         <a class="btn-sm" href="/portal/${esc(c.slug)}" target="_blank" title="View Portal"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-eye"/></svg></a>
         <button class="btn-sm btn-danger" data-clid="${c.id}" data-clname="${esc(c.name).replace(/"/g,'&quot;')}" onclick="deleteClient(this.dataset.clid, this.dataset.clname)" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-trash"/></svg></button>
       </td>
@@ -5011,6 +5321,86 @@ function openClientModal(id) {
 
 function closeClientModal() {
   $('client-modal').classList.remove('open');
+}
+
+// ── Workflow Config ──
+async function openWorkflowModal(clientId, clientName) {
+  $('wf-client-id').value = clientId;
+  $('wf-modal-title').textContent = 'Workflow — ' + clientName;
+  $('workflow-result').textContent = '';
+  $('workflow-result').className = 'email-result';
+
+  // Reset UI
+  $('wf-sms-enabled').checked = false;
+  $('wf-sms-fields').style.display = 'none';
+  $('wf-email-enabled').checked = false;
+  $('wf-email-fields').style.display = 'none';
+  $('wf-webhook-enabled').checked = false;
+  $('wf-webhook-fields').style.display = 'none';
+  $('wf-sheet-enabled').checked = false;
+  $('wf-sheet-fields').style.display = 'none';
+
+  // Load existing config
+  const wf = await fetchJSON('/api/clients/' + clientId + '/workflow');
+  if (wf && wf.sms_enabled) {
+    $('wf-sms-enabled').checked = true;
+    $('wf-sms-fields').style.display = 'block';
+    $('wf-sms-number').value = wf.sms_number || '';
+    $('wf-sms-msg').value = wf.sms_message || 'New lead: {name}, {phone} — {message}';
+  }
+  if (wf && wf.email_sequence_enabled) {
+    $('wf-email-enabled').checked = true;
+    $('wf-email-fields').style.display = 'block';
+    $('wf-email-delays').value = wf.email_delay_hours || '0,72,168';
+  }
+  if (wf && wf.webhook_enabled) {
+    $('wf-webhook-enabled').checked = true;
+    $('wf-webhook-fields').style.display = 'block';
+    $('wf-webhook-url').value = wf.webhook_url || '';
+    $('wf-webhook-secret').value = wf.webhook_secret || '';
+  }
+  if (wf && wf.sheet_enabled) {
+    $('wf-sheet-enabled').checked = true;
+    $('wf-sheet-fields').style.display = 'block';
+    $('wf-sheet-id').value = wf.sheet_id || '';
+  }
+
+  $('workflow-modal').classList.add('open');
+}
+
+function closeWorkflowModal() {
+  $('workflow-modal').classList.remove('open');
+}
+
+async function saveWorkflow() {
+  const clientId = $('wf-client-id').value;
+  const body = {
+    sms_enabled: $('wf-sms-enabled').checked,
+    sms_number: $('wf-sms-number').value.trim(),
+    sms_message: $('wf-sms-msg').value.trim(),
+    email_sequence_enabled: $('wf-email-enabled').checked,
+    email_delay_hours: $('wf-email-delays').value.trim(),
+    webhook_enabled: $('wf-webhook-enabled').checked,
+    webhook_url: $('wf-webhook-url').value.trim(),
+    webhook_secret: $('wf-webhook-secret').value.trim(),
+    sheet_enabled: $('wf-sheet-enabled').checked,
+    sheet_id: $('wf-sheet-id').value.trim(),
+  };
+
+  const res = await fetchJSON('/api/clients/' + clientId + '/workflow', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (res && res.success) {
+    $('workflow-result').className = 'email-result success';
+    $('workflow-result').textContent = 'Workflow saved!';
+    setTimeout(closeWorkflowModal, 800);
+  } else {
+    $('workflow-result').className = 'email-result error';
+    $('workflow-result').textContent = 'Failed to save workflow';
+  }
 }
 
 function genPassword() {
