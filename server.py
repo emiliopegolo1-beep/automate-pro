@@ -4964,7 +4964,7 @@ async function loadClients() {
         <button class="btn-sm" onclick="openClientModal('${c.id}')" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-edit"/></svg></button>
         <button class="btn-sm" onclick="generateStripe('${c.id}')" title="Generate Stripe Prices" style="${c.setup_amount > 0 || c.monthly_amount > 0 ? '' : 'opacity:0.3'}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-dollar"/></svg></button>
         <a class="btn-sm" href="/portal/${esc(c.slug)}" target="_blank" title="View Portal"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-eye"/></svg></a>
-        <button class="btn-sm btn-danger" onclick="deleteClient('${c.id}','${esc(c.name).replace(/'/g,"\\'")}')" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-trash"/></svg></button>
+        <button class="btn-sm btn-danger" data-clid="${c.id}" data-clname="${esc(c.name).replace(/"/g,'&quot;')}" onclick="deleteClient(this.dataset.clid, this.dataset.clname)" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-trash"/></svg></button>
       </td>
     </tr>`;
   }).join('');
@@ -5147,11 +5147,11 @@ async function sendAtlas() {
     if (res && res.reply) {
       appendAtlasMsg('assistant', res.reply, 'atlas-messages');
     } else {
-      appendAtlasMsg('assistant', 'Sorry, I couldn\'t process that. Try again.', 'atlas-messages');
+      appendAtlasMsg('assistant', "Sorry, I could not process that. Try again.", 'atlas-messages');
     }
   } catch (e) {
     removeAtlasTyping('atlas-messages');
-    appendAtlasMsg('assistant', 'Connection error. Try again.', 'atlas-messages');
+    appendAtlasMsg('assistant', "Connection error. Try again.", 'atlas-messages');
   }
   scrollAtlas('atlas-messages');
 }
@@ -5175,11 +5175,11 @@ async function sendAtlasFS() {
     if (res && res.reply) {
       appendAtlasMsg('assistant', res.reply, 'atlas-fullscreen-messages');
     } else {
-      appendAtlasMsg('assistant', 'Sorry, I couldn\'t process that. Try again.', 'atlas-fullscreen-messages');
+      appendAtlasMsg('assistant', "Sorry, I could not process that. Try again.", 'atlas-fullscreen-messages');
     }
   } catch (e) {
     removeAtlasTyping('atlas-fullscreen-messages');
-    appendAtlasMsg('assistant', 'Connection error. Try again.', 'atlas-fullscreen-messages');
+    appendAtlasMsg('assistant', "Connection error. Try again.", 'atlas-fullscreen-messages');
   }
   scrollAtlas('atlas-fullscreen-messages');
 }
