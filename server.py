@@ -662,6 +662,19 @@ def serve_react(path):
 
 
 
+@app.route("/api/health")
+def api_health():
+    db_ok = "unknown"
+    try:
+        conn = get_db()
+        conn.execute("SELECT 1")
+        conn.close()
+        db_ok = "ok"
+    except Exception as e:
+        db_ok = f"error: {e}"
+    return jsonify({"status": "ok", "db": db_ok, "turso": bool(TURSO_URL)})
+
+
 # ── AI Chat (DeepSeek) ──────────────────────────────────────────────────────────
 
 import urllib.request
@@ -5097,7 +5110,11 @@ def plumber_demo():
 
 
 # Run DB init at import time (gunicorn doesn't run __main__)
-init_db()
+try:
+    init_db()
+except Exception as e:
+    print(f"[STARTUP] init_db() failed: {e}")
+    print("[STARTUP] App will start without DB — check TURSO_URL and TURSO_TOKEN")
 
 # ── React SPA catch-all (must be LAST route) ──────────────────────────────
 
@@ -5113,7 +5130,7 @@ if __name__ == "__main__":
     print("\n" + "=" * 50)
     print("  Automate Pro — Full Business System")
     print("=" * 50)
-    print(f"  DB:       {DB_PATH}")
+    print(f"  DB:       {'Turso' if TURSO_URL else 'local SQLite'}")
     print(f"  Notify:   {NOTIFY_EMAIL}")
     print(f"  Running:  http://localhost:5002")
     print("=" * 50)
