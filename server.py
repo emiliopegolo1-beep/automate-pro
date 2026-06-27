@@ -2,14 +2,6 @@
 """Automate Pro — Lead Capture & Admin Dashboard Server."""
 import os
 import sys
-import socket as _socket
-
-# ── IPv4-only patching (Render Free blocks IPv6) ──
-_orig_getaddrinfo = _socket.getaddrinfo
-def _ipv4_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    return _orig_getaddrinfo(host, port, _socket.AF_INET, type, proto, flags)
-_socket.getaddrinfo = _ipv4_getaddrinfo
-
 import psycopg2
 import psycopg2.extras
 import uuid
@@ -148,14 +140,28 @@ def create_test_products():
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
+_POOLER_HOST = "aws-0-ap-southeast-1.pooler.supabase.com"
+
 def get_db():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL environment variable not set")
     dsn = DATABASE_URL.strip()
-    if "sslmode" not in dsn and "postgresql" in dsn:
-        separator = "?" if "?" not in dsn else "&"
-        dsn = f"{dsn}{separator}sslmode=require"
-    conn = psycopg2.connect(dsn, connect_timeout=10)
+    # Route through Supabase pooler for IPv4 (Render Free blocks IPv6)
+    import re as _re, socket as _sock
+    m = _re.search(r'@([^:]+):(\d+)', dsn)
+    if m and m.group(1) != _POOLER_HOST and 'pooler.supabase.com' not in m.group(1):
+        orig_host = m.group(1)
+        port = m.group(2)
+        user = dsn.split('://')[1].split('@')[0].split(':')[0]
+        pwd = dsn.split('://')[1].split('@')[0].split(':')[1] if ':' in dsn.split('://')[1].split('@')[0] else ''
+        try:
+            ip = _sock.gethostbyname(_POOLER_HOST)
+        except Exception:
+            ip = _POOLER_HOST
+        dsn = f"postgresql://{user}:{pwd}@{ip}:{port}/postgres?sslmode=require&host={orig_host}"
+    elif "sslmode" not in dsn:
+        dsn += "&sslmode=require" if "?" in dsn else "?sslmode=require"
+    conn = psycopg2.connect(dsn, connect_timeout=30)
     conn.cursor_factory = psycopg2.extras.RealDictCursor
     return conn
 
