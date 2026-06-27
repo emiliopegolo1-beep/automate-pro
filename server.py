@@ -143,9 +143,10 @@ def create_test_products():
 def get_db():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL environment variable not set")
-    dsn = DATABASE_URL
+    dsn = DATABASE_URL.strip()
     if "sslmode" not in dsn and "postgresql" in dsn:
-        dsn += "?sslmode=require" if "?" not in dsn else "&sslmode=require"
+        separator = "?" if "?" not in dsn else "&"
+        dsn = f"{dsn}{separator}sslmode=require"
     conn = psycopg2.connect(dsn)
     conn.cursor_factory = psycopg2.extras.RealDictCursor
     return conn
