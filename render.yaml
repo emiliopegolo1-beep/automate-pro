@@ -22,4 +22,4 @@ services:
       - key: DASHBOARD_PASSWORD
         sync: false
       - key: DOMAIN
-        value: "https://automate-pro.onrender.com"
+        value: "https://automate-pro-jqy1.onrender.com"
