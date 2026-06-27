@@ -228,9 +228,77 @@ class TursoConnection:
     def close(self):
         self._sess.close()
 
-CLIENT_CREDENTIALS = {
-    "bob": {"name": "Bob's Plumbing", "password": "plumb2026", "notify_email": "bob@bobsplumbing.com"},
-}
+def get_client_by_slug(slug):
+    """Look up a client by their portal slug. Returns dict or None."""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM clients WHERE slug = ?", (slug,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def get_all_clients():
+    """Return all clients ordered by name."""
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM clients ORDER BY name ASC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_client_by_id(client_id):
+    """Look up a client by ID. Returns dict or None."""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def save_client(client_id, name, slug, password, notify_email="", status="active",
+                setup_amount=0, monthly_amount=0, notes=""):
+    """Insert or update a client."""
+    conn = get_db()
+    existing = conn.execute("SELECT id FROM clients WHERE id = ?", (client_id,)).fetchone()
+    if existing:
+        conn.execute(
+            """UPDATE clients SET name=?, slug=?, password=?, notify_email=?, status=?,
+               setup_amount=?, monthly_amount=?, notes=?, updated_at=CURRENT_TIMESTAMP
+               WHERE id=?""",
+            (name, slug, password, notify_email, status, setup_amount, monthly_amount, notes, client_id),
+        )
+    else:
+        conn.execute(
+            """INSERT INTO clients (id, name, slug, password, notify_email, status,
+               setup_amount, monthly_amount, notes) VALUES (?,?,?,?,?,?,?,?,?)""",
+            (client_id, name, slug, password, notify_email, status, setup_amount, monthly_amount, notes),
+        )
+    conn.commit()
+    conn.close()
+
+def delete_client_from_db(client_id):
+    """Delete a client and update their leads back to generic source."""
+    conn = get_db()
+    client = get_client_by_id(client_id)
+    if client:
+        old_source = f"client:{client['slug']}"
+        conn.execute(
+            "UPDATE leads SET source = 'automate_pro', notify_email = '' WHERE source = ?",
+            (old_source,),
+        )
+        conn.execute("DELETE FROM clients WHERE id = ?", (client_id,))
+        conn.commit()
+    conn.close()
+
+# Keep hardcoded dict for test/demo — DB is the source of truth
+CLIENT_CREDENTIALS = {}
+# Preload clients from DB at import time
+def _preload_clients():
+    """Load clients from Turso/DB into CLIENT_CREDENTIALS dict for fast lookups."""
+    try:
+        for c in get_all_clients():
+            CLIENT_CREDENTIALS[c["slug"]] = {
+                "id": c["id"],
+                "name": c["name"],
+                "password": c["password"],
+                "notify_email": c["notify_email"],
+            }
+    except Exception as e:
+        print(f"[STARTUP] Could not preload clients: {e}")
 
 # ── Stripe Configuration ─────────────────────────────────────────────────────
 
@@ -391,6 +459,52 @@ def init_db():
             conn.execute(f"ALTER TABLE invoices ADD COLUMN {col_name} {col_def}")
         except Exception:
             pass
+
+    # ── Clients table ──
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS clients (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            slug TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            notify_email TEXT NOT NULL DEFAULT '',
+            status TEXT DEFAULT 'active',
+            plan TEXT DEFAULT 'custom',
+            setup_amount REAL DEFAULT 0,
+            monthly_amount REAL DEFAULT 0,
+            stripe_setup_price_id TEXT DEFAULT '',
+            stripe_monthly_price_id TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """
+    )
+    # Safe migration: add newer columns if missing
+    client_cols = [
+        ("plan", "TEXT DEFAULT 'custom'"),
+        ("setup_amount", "REAL DEFAULT 0"),
+        ("monthly_amount", "REAL DEFAULT 0"),
+        ("stripe_setup_price_id", "TEXT DEFAULT ''"),
+        ("stripe_monthly_price_id", "TEXT DEFAULT ''"),
+        ("notes", "TEXT DEFAULT ''"),
+        ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+    ]
+    for col_name, col_def in client_cols:
+        try:
+            conn.execute(f"ALTER TABLE clients ADD COLUMN {col_name} {col_def}")
+        except Exception:
+            pass
+
+    # Seed test client (Bob) if no clients exist
+    existing = conn.execute("SELECT COUNT(*) FROM clients").fetchone()
+    if existing and existing[0] == 0:
+        bob_id = str(uuid.uuid4())[:8]
+        conn.execute(
+            "INSERT INTO clients (id, name, slug, password, notify_email, status) VALUES (?, ?, ?, ?, ?, ?)",
+            (bob_id, "Bob's Plumbing", "bob", "plumb2026", "bob@bobsplumbing.com", "test"),
+        )
 
     conn.commit()
     conn.close()
@@ -1333,6 +1447,127 @@ loadLeads();
 </script>
 </body>
 </html>"""
+
+
+# ── Client CRUD APIs (admin dashboard) ────────────────────────────────────────
+
+@app.route("/api/clients", methods=["GET"])
+def api_clients():
+    """List all clients."""
+    if not session.get("authenticated"):
+        return jsonify({"error": "Unauthorized"}), 401
+    clients = get_all_clients()
+    return jsonify(clients)
+
+@app.route("/api/clients", methods=["POST"])
+def api_clients_create():
+    """Add or update a client."""
+    if not session.get("authenticated"):
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    name = (data.get("name") or "").strip()
+    slug = (data.get("slug") or "").strip().lower().replace(" ", "-")
+    password = (data.get("password") or "").strip()
+    notify_email = (data.get("notify_email") or "").strip()
+    setup_amount = float(data.get("setup_amount", 0) or 0)
+    monthly_amount = float(data.get("monthly_amount", 0) or 0)
+    notes = (data.get("notes") or "").strip()
+    status = data.get("status", "active")
+
+    if not name or not slug or not password:
+        return jsonify({"error": "Name, slug, and password are required"}), 400
+
+    client_id = data.get("id")
+    is_new = not client_id
+    if is_new:
+        # Check slug uniqueness
+        existing = get_client_by_slug(slug)
+        if existing:
+            return jsonify({"error": "A client with that slug already exists"}), 409
+        client_id = str(uuid.uuid4())[:8]
+
+    save_client(client_id, name, slug, password, notify_email, status,
+                setup_amount, monthly_amount, notes)
+
+    # Reload credentials dict
+    conn = get_db()
+    row = conn.execute("SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
+    conn.close()
+    c = dict(row) if row else None
+    if c:
+        CLIENT_CREDENTIALS[c["slug"]] = {
+            "id": c["id"],
+            "name": c["name"],
+            "password": c["password"],
+            "notify_email": c["notify_email"],
+        }
+
+    return jsonify({"success": True, "client": c})
+
+@app.route("/api/clients/<client_id>", methods=["DELETE"])
+def api_clients_delete(client_id):
+    """Delete a client."""
+    if not session.get("authenticated"):
+        return jsonify({"error": "Unauthorized"}), 401
+    client = get_client_by_id(client_id)
+    if not client:
+        return jsonify({"error": "Client not found"}), 404
+    # Remove from dict
+    slug = client["slug"]
+    CLIENT_CREDENTIALS.pop(slug, None)
+    delete_client_from_db(client_id)
+    return jsonify({"success": True})
+
+@app.route("/api/clients/<client_id>/stripe", methods=["POST"])
+def api_clients_stripe(client_id):
+    """Generate Stripe price IDs for a client with custom amounts."""
+    if not session.get("authenticated"):
+        return jsonify({"error": "Unauthorized"}), 401
+    client = get_client_by_id(client_id)
+    if not client:
+        return jsonify({"error": "Client not found"}), 404
+    data = request.get_json(silent=True) or {}
+    setup_amount = float(data.get("setup_amount", client.get("setup_amount", 0)) or 0)
+    monthly_amount = float(data.get("monthly_amount", client.get("monthly_amount", 0)) or 0)
+
+    setup_price_id = None
+    monthly_price_id = None
+    errors = []
+
+    if setup_amount > 0:
+        try:
+            product = stripe.Product.create(name=f"{client['name']} — Setup")
+            price = stripe.Price.create(product=product.id, unit_amount=int(setup_amount * 100), currency="usd")
+            setup_price_id = price.id
+        except Exception as e:
+            errors.append(f"Setup price: {e}")
+
+    if monthly_amount > 0:
+        try:
+            product = stripe.Product.create(name=f"{client['name']} — Monthly")
+            price = stripe.Price.create(product=product.id, unit_amount=int(monthly_amount * 100), currency="usd", recurring={"interval": "month"})
+            monthly_price_id = price.id
+        except Exception as e:
+            errors.append(f"Monthly price: {e}")
+
+    # Save to DB
+    conn = get_db()
+    conn.execute(
+        "UPDATE clients SET setup_amount=?, monthly_amount=?, stripe_setup_price_id=?, stripe_monthly_price_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (setup_amount, monthly_amount, setup_price_id or "", monthly_price_id or "", client_id),
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "success": True,
+        "setup_price_id": setup_price_id,
+        "monthly_price_id": monthly_price_id,
+        "errors": errors,
+    })
 
 
 def get_client_portal_leads(client_id):
@@ -3275,6 +3510,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <g id="ic-eye"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></g>
     <g id="ic-ban"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 14.14 14.14"/></g>
     <g id="ic-circle"><circle cx="12" cy="12" r="10"/></g>
+    <g id="ic-users"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></g>
+    <g id="ic-trash"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></g>
+    <g id="ic-edit"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></g>
+    <g id="ic-plus-circle"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></g>
   </defs>
 </svg>
 
@@ -3297,6 +3536,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <a href="#" onclick="switchTab('pipeline'); return false;">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-columns"/></svg>
       Pipeline
+    </a>
+    <a href="#" onclick="switchTab('clients'); return false;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-users"/></svg>
+      Clients
     </a>
   </nav>
   <div class="logout-section">
@@ -3368,6 +3611,92 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 
 </div>
+
+<!-- ── Clients Tab ── -->
+  <div id="clients-tab" style="display:none;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+      <h2 style="margin-bottom:0;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-users"/></svg> Clients</h2>
+      <button class="btn btn-accent" onclick="openClientModal()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-plus-circle"/></svg>
+        Add Client
+      </button>
+    </div>
+    <div class="table-card">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Client</th>
+            <th>Slug</th>
+            <th>Plan</th>
+            <th>Setup</th>
+            <th>Monthly</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="clients-body">
+          <tr><td colspan="7" class="loading">Loading clients</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Client Modal -->
+  <div class="modal-overlay" id="client-modal">
+    <div class="modal" style="max-width:500px;">
+      <button class="close-btn" onclick="closeClientModal()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-x"/></svg>
+      </button>
+      <h3 id="client-modal-title">Add Client</h3>
+      <div class="modal-sub">Create a new client account with their own portal</div>
+
+      <input type="hidden" id="cl-id">
+      <div class="form-group">
+        <label>Business Name</label>
+        <input type="text" id="cl-name" placeholder="Acme Plumbing Co.">
+      </div>
+      <div class="form-group">
+        <label>Portal Slug</label>
+        <input type="text" id="cl-slug" placeholder="acme-plumbing" style="font-family: monospace;">
+        <small style="color:var(--text-muted);">They'll log in at /portal/<b id="cl-slug-preview">acme-plumbing</b></small>
+      </div>
+      <div class="form-group">
+        <label>Portal Password</label>
+        <input type="text" id="cl-password" placeholder="Password for client login">
+      </div>
+      <div class="form-group">
+        <label>Notification Email</label>
+        <input type="email" id="cl-email" placeholder="client@theirdomain.com">
+        <small style="color:var(--text-muted);">Leads from their form will be forwarded here</small>
+      </div>
+      <div class="form-group">
+        <label>Setup Fee ($)</label>
+        <input type="number" id="cl-setup" placeholder="0.00" step="0.01" min="0">
+      </div>
+      <div class="form-group">
+        <label>Monthly Retainer ($)</label>
+        <input type="number" id="cl-monthly" placeholder="0.00" step="0.01" min="0">
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea id="cl-notes" rows="2" placeholder="Any notes about this client..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>Status</label>
+        <select id="cl-status">
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+          <option value="test">Test</option>
+          <option value="onboarding">Onboarding</option>
+        </select>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-accent" onclick="saveClient()">Save Client</button>
+        <button class="btn btn-outline" onclick="closeClientModal()">Cancel</button>
+      </div>
+      <div id="client-result" class="email-result"></div>
+    </div>
+  </div>
 
 <!-- Create Invoice Modal -->
 <div class="modal-overlay" id="create-invoice-modal">
@@ -4139,6 +4468,7 @@ function switchTab(tab) {
 
   // Hide all non-sidebar panels first
   $('invoices-tab').style.display = 'none';
+  $('clients-tab').style.display = 'none';
   document.querySelectorAll('.section-title, #revenue-title').forEach(el => el.style.display = 'none');
   $('main-content').querySelector('h2').style.display = 'block';
 
@@ -4172,6 +4502,7 @@ function switchTab(tab) {
     $('main-content').querySelector('h2').textContent = 'Pipeline';
     $('main-content').querySelector('h2').style.display = 'block';
     $('invoices-tab').style.display = 'none';
+    $('clients-tab').style.display = 'none';
     $('stats-grid').style.display = 'none';
     document.querySelector('.section-title').textContent = 'Full Pipeline';
     document.querySelector('.section-title').style.display = 'block';
@@ -4179,6 +4510,16 @@ function switchTab(tab) {
     $('revenue-title').style.display = 'none';
     $('revenue-grid').style.display = 'none';
     loadAllLeadsForKanban();
+  } else if (tab === 'clients') {
+    $('main-content').querySelector('h2').style.display = 'none';
+    $('invoices-tab').style.display = 'none';
+    $('clients-tab').style.display = 'block';
+    $('stats-grid').style.display = 'none';
+    $('kanban').style.display = 'none';
+    $('revenue-title').style.display = 'none';
+    $('revenue-grid').style.display = 'none';
+    document.querySelector('.section-title').style.display = 'none';
+    loadClients();
   }
 }
 
@@ -4195,8 +4536,159 @@ document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') closeModal();
 });
 
+// ── Client Management ──
+async function loadClients() {
+  const data = await fetchJSON('/api/clients');
+  const tbody = $('clients-body');
+  if (!data || !data.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="loading">No clients yet — add your first client</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.map(c => {
+    const setup = c.setup_amount > 0 ? '$' + c.setup_amount : '—';
+    const monthly = c.monthly_amount > 0 ? '$' + c.monthly_amount + '/mo' : '—';
+    const statusClass = c.status === 'active' ? 'badge-success' : c.status === 'test' ? 'badge-warning' : 'badge-muted';
+    const portalUrl = 'https://' + location.host + '/portal/' + c.slug;
+    return `<tr>
+      <td class="mono"><strong>${esc(c.name)}</strong></td>
+      <td><code style="cursor:pointer;" onclick="copyText('${portalUrl}');toast('Copied portal URL','success')" title="Click to copy URL">${esc(c.slug)}</code></td>
+      <td>${esc(c.plan || 'custom')}</td>
+      <td>${setup}</td>
+      <td>${monthly}</td>
+      <td><span class="badge ${statusClass}">${c.status}</span></td>
+      <td class="actions">
+        <button class="btn-sm" onclick="openClientModal('${c.id}')" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-edit"/></svg></button>
+        <button class="btn-sm" onclick="generateStripe('${c.id}')" title="Generate Stripe Prices" style="${c.setup_amount > 0 || c.monthly_amount > 0 ? '' : 'opacity:0.3'}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-dollar"/></svg></button>
+        <a class="btn-sm" href="/portal/${esc(c.slug)}" target="_blank" title="View Portal"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-eye"/></svg></a>
+        <button class="btn-sm btn-danger" onclick="deleteClient('${c.id}','${esc(c.name).replace(/'/g,"\\'")}')" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-trash"/></svg></button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openClientModal(id) {
+  $('client-result').textContent = '';
+  $('client-result').className = 'email-result';
+  if (id) {
+    $('client-modal-title').textContent = 'Edit Client';
+    fetchJSON('/api/clients').then(clients => {
+      const c = (clients || []).find(x => x.id === id);
+      if (!c) return;
+      $('cl-id').value = c.id;
+      $('cl-name').value = c.name;
+      $('cl-slug').value = c.slug;
+      $('cl-password').value = c.password;
+      $('cl-email').value = c.notify_email || '';
+      $('cl-setup').value = c.setup_amount || '';
+      $('cl-monthly').value = c.monthly_amount || '';
+      $('cl-notes').value = c.notes || '';
+      $('cl-status').value = c.status || 'active';
+      $('cl-slug-preview').textContent = c.slug;
+    });
+  } else {
+    $('client-modal-title').textContent = 'Add Client';
+    $('cl-id').value = '';
+    $('cl-name').value = '';
+    $('cl-slug').value = '';
+    $('cl-password').value = genPassword();
+    $('cl-email').value = '';
+    $('cl-setup').value = '';
+    $('cl-monthly').value = '';
+    $('cl-notes').value = '';
+    $('cl-status').value = 'active';
+    $('cl-slug-preview').textContent = '';
+  }
+  $('client-modal').classList.add('open');
+  // Live slug preview
+  $('cl-slug').oninput = function() {
+    $('cl-slug-preview').textContent = this.value.toLowerCase().replace(/\\s+/g, '-').replace(/[^a-z0-9-]/g, '') || 'slug';
+  };
+}
+
+function closeClientModal() {
+  $('client-modal').classList.remove('open');
+}
+
+function genPassword() {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let pw = '';
+  for (let i = 0; i < 10; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+  return pw;
+}
+
+async function saveClient() {
+  const id = $('cl-id').value;
+  const name = $('cl-name').value.trim();
+  const slug = $('cl-slug').value.trim().toLowerCase().replace(/\\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  const password = $('cl-password').value.trim();
+  const notify_email = $('cl-email').value.trim();
+  const setup_amount = parseFloat($('cl-setup').value) || 0;
+  const monthly_amount = parseFloat($('cl-monthly').value) || 0;
+  const notes = $('cl-notes').value.trim();
+  const status = $('cl-status').value;
+
+  if (!name || !slug || !password) {
+    $('client-result').className = 'email-result error';
+    $('client-result').textContent = 'Name, slug, and password are required';
+    return;
+  }
+
+  const body = { name, slug, password, notify_email, status, setup_amount, monthly_amount, notes };
+  if (id) body.id = id;
+
+  const res = await fetchJSON('/api/clients', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (res && res.success) {
+    $('client-result').className = 'email-result success';
+    $('client-result').textContent = id ? 'Client updated!' : 'Client created!';
+    loadClients();
+    setTimeout(closeClientModal, 800);
+  } else {
+    $('client-result').className = 'email-result error';
+    $('client-result').textContent = (res ? res.error : 'Failed to save client');
+  }
+}
+
+async function deleteClient(id, name) {
+  if (!confirm('Delete ' + name + '? Their leads will not be deleted, just unlinked.')) return;
+  const res = await fetchJSON('/api/clients/' + id, { method: 'DELETE' });
+  if (res && res.success) {
+    toast('Client deleted', 'success');
+    loadClients();
+  } else {
+    toast('Failed to delete client', 'error');
+  }
+}
+
+async function generateStripe(id) {
+  const res = await fetchJSON('/api/clients/' + id + '/stripe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  if (res && res.success) {
+    const msg = [];
+    if (res.setup_price_id) msg.push('Setup price created: ' + res.setup_price_id);
+    if (res.monthly_price_id) msg.push('Monthly price created: ' + res.monthly_price_id);
+    if (res.errors.length) msg.push('Errors: ' + res.errors.join(', '));
+    toast(msg.join(' | ') || 'Prices generated', 'success');
+    loadClients();
+  } else {
+    toast('Failed to generate Stripe prices', 'error');
+  }
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).catch(() => {});
+}
+
 // ── Init ──
 $('invoices-tab').style.display = 'none';
+$('clients-tab').style.display = 'none';
 loadDashboard();
 </script>
 </body>
@@ -5112,6 +5604,7 @@ def plumber_demo():
 # Run DB init at import time (gunicorn doesn't run __main__)
 try:
     init_db()
+    _preload_clients()
 except Exception as e:
     print(f"[STARTUP] init_db() failed: {e}")
     print("[STARTUP] App will start without DB — check TURSO_URL and TURSO_TOKEN")
