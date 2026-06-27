@@ -27,6 +27,7 @@ import base64
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "")
 GMAIL_CLIENT_ID = os.environ.get("GMAIL_CLIENT_ID", "")
@@ -46,17 +47,27 @@ def _get_gmail_service():
     )
     return build("gmail", "v1", credentials=creds)
 
-def send_email(to, subject, body):
-    """Send email via Gmail API using stored refresh token."""
+def _plain_text(html):
+    """Strip HTML tags for plain text fallback."""
+    import re
+    text = re.sub(r'<br\s*/?>', '\n', html)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+def send_email(to, subject, html_body):
+    """Send HTML email via Gmail API with plain text fallback."""
     service = _get_gmail_service()
     if not service:
         print("[EMAIL DISABLED] Set GMAIL_REFRESH_TOKEN env var to enable")
         return {"success": False, "error": "Gmail not configured"}
     try:
-        msg = MIMEText(body)
+        msg = MIMEMultipart("alternative")
         msg["To"] = to
         msg["Subject"] = subject
         msg["From"] = "me"
+        msg.attach(MIMEText(_plain_text(html_body), "plain"))
+        msg.attach(MIMEText(html_body, "html"))
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
         service.users().messages().send(userId="me", body={"raw": raw}).execute()
         return {"success": True}
@@ -303,32 +314,89 @@ def mark_notified(lead_id):
     conn.close()
 
 
+# ── Shared HTML email wrapper ──
+_EMAIL_CSS = """
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;padding:0;background:#080807;color:#F0EBE1}
+.container{max-width:560px;margin:0 auto;padding:40px 24px}
+.card{background:#191816;border:1px solid rgba(212,165,100,0.12);border-radius:14px;padding:36px 28px}
+h1{font-size:22px;color:#F0EBE1;margin:0 0 8px;font-weight:600}
+h2{font-size:16px;color:#D4A564;margin:0 0 20px;font-weight:400;font-family:monospace;letter-spacing:0.06em}
+p{font-size:15px;line-height:1.6;color:rgba(240,235,225,0.7);margin:0 0 16px}
+b{color:#F0EBE1}
+.btn{display:inline-block;padding:14px 32px;background:#D4A564;color:#080807;font-weight:600;font-size:15px;border-radius:10px;text-decoration:none;margin:8px 0 24px}
+.divider{height:1px;background:linear-gradient(90deg,transparent,rgba(212,165,100,0.2),transparent);margin:24px 0}
+.footer{font-size:12px;color:rgba(240,235,225,0.25);text-align:center;margin-top:24px}
+.label{font-size:11px;color:rgba(240,235,225,0.3);text-transform:uppercase;letter-spacing:0.1em;font-family:monospace}
+.value{font-size:15px;color:#F0EBE1}
+"""
+
+def _html_email(subject, content_html):
+    """Wrap content in a premium dark email template."""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="background:#080807;padding:0;margin:0">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#080807">
+<tr><td align="center">
+<div style="max-width:560px;padding:32px 20px">
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td style="padding:0 0 24px">
+<p style="font-family:monospace;font-size:11px;color:rgba(240,235,225,0.3);letter-spacing:0.1em;margin:0">AUTOMATE PRO</p>
+</td></tr>
+</table>
+{content_html}
+<div style="margin-top:32px;padding-top:16px;text-align:center">
+<p style="font-size:12px;color:rgba(240,235,225,0.25);margin:0">&copy; 2026 Automate Pro &mdash; AI Workflow Automation</p>
+</div>
+</div>
+</td></tr>
+</table>
+</body>
+</html>"""
+
+
 def build_auto_reply_body(name, business_type):
-    return (
-        f"Hi {name},\n\n"
-        f"Thanks for reaching out about automating your {business_type} business!\n\n"
-        "We specialize in building custom AI workflows that handle your leads, "
-        "bookings, follow-ups, and admin — so you can focus on the work that pays.\n\n"
-        "Next step: Pick a time for a free 15-minute discovery call.\n"
-        f"Book here: https://calendly.com/emilio-pegolo1/30min\n\n"
-        "Looking forward to connecting,\n\n"
-        "Emilio\n"
-        "Automate Pro"
-    )
+    content = f"""
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#191816;border:1px solid rgba(212,165,100,0.12);border-radius:14px">
+<tr><td style="padding:36px 28px">
+<h1 style="font-size:22px;color:#F0EBE1;margin:0 0 6px;font-weight:600">Thanks for reaching out, {name}</h1>
+<h2 style="font-size:13px;color:#D4A564;margin:0 0 24px;font-weight:400;font-family:monospace;letter-spacing:0.06em">{business_type} AUTOMATION</h2>
+<p style="font-size:15px;line-height:1.7;color:rgba(240,235,225,0.7);margin:0 0 16px">We build custom AI workflows that handle your leads, bookings, follow-ups, and admin — so you can focus on the work that actually pays.</p>
+<p style="font-size:15px;line-height:1.7;color:rgba(240,235,225,0.7);margin:0 0 20px">Next step: pick a time for a <b>free 15-minute discovery call</b> — no commitment, no pitch.</p>
+<a href="https://calendly.com/emilio-pegolo1/30min" style="display:inline-block;padding:14px 32px;background:#D4A564;color:#080807;font-weight:600;font-size:15px;border-radius:10px;text-decoration:none">Book Your Call</a>
+<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(212,165,100,0.2),transparent);margin:28px 0"></div>
+<p style="font-size:14px;color:rgba(240,235,225,0.45);margin:0">Looking forward to connecting,<br><b style="color:rgba(240,235,225,0.8)">Emilio</b><br>Automate Pro</p>
+</td></tr>
+</table>
+</td></tr>
+</table>"""
+    return _html_email(f"Thanks for reaching out, {name}!", content)
 
 
 def build_notify_body(name, email, business_type, message, timestamp):
-    return (
-        "New Lead Captured!\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Name: {name}\n"
-        f"Email: {email}\n"
-        f"Business: {business_type}\n"
-        f"Message: {message or '(none)'}\n"
-        f"Time: {timestamp}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Auto-response sent: Yes"
-    )
+    content = f"""
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#191816;border:1px solid rgba(212,165,100,0.12);border-radius:14px">
+<tr><td style="padding:36px 28px">
+<h1 style="font-size:22px;color:#F0EBE1;margin:0 0 6px;font-weight:600">New Lead Captured</h1>
+<h2 style="font-size:13px;color:#D4A564;margin:0 0 28px;font-weight:400;font-family:monospace;letter-spacing:0.06em">{timestamp}</h2>
+<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px">
+<tr><td style="padding:10px 0;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:11px;color:rgba(240,235,225,0.3);text-transform:uppercase;letter-spacing:0.1em;font-family:monospace">Name</span></td><td style="padding:10px 0;text-align:right;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:15px;color:#F0EBE1;font-weight:500">{name}</span></td></tr>
+<tr><td style="padding:10px 0;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:11px;color:rgba(240,235,225,0.3);text-transform:uppercase;letter-spacing:0.1em;font-family:monospace">Email</span></td><td style="padding:10px 0;text-align:right;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:15px;color:#F0EBE1;font-weight:500">{email}</span></td></tr>
+<tr><td style="padding:10px 0;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:11px;color:rgba(240,235,225,0.3);text-transform:uppercase;letter-spacing:0.1em;font-family:monospace">Business</span></td><td style="padding:10px 0;text-align:right;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:15px;color:#F0EBE1;font-weight:500">{business_type or 'N/A'}</span></td></tr>
+</table>
+<div style="background:rgba(212,165,100,0.06);border-radius:10px;padding:20px;margin-bottom:8px">
+<p style="font-size:14px;line-height:1.5;color:rgba(240,235,225,0.65);margin:0">{message or '(no message)'}</p>
+</div>
+<p style="font-size:11px;color:rgba(240,235,225,0.3);text-transform:uppercase;letter-spacing:0.1em;font-family:monospace;margin:0">Auto-response sent</p>
+</td></tr>
+</table>
+</td></tr>
+</table>"""
+    return _html_email(f"New Lead: {name} — {business_type or 'N/A'}", content)
 
 
 # ── Invoice Helpers ──────────────────────────────────────────────────────────
@@ -358,26 +426,47 @@ def get_invoice_by_id(invoice_id):
 
 
 def build_invoice_email_body(inv, stripe_url=None, sub_stripe_url=None):
-    payment_section = f"\nPay setup fee: {stripe_url}\n" if stripe_url else f"\nView invoice: https://automate-pro-production.up.railway.app/invoice/{inv['id']}\n"
-    sub_section = ""
+    setup_html = f'<a href="{stripe_url}" style="display:inline-block;padding:14px 32px;background:#D4A564;color:#080807;font-weight:600;font-size:15px;border-radius:10px;text-decoration:none;margin:8px 0">Pay Setup Fee &mdash; ${inv["amount"]:,.2f}</a>' if stripe_url else f'<p style="font-size:14px;color:rgba(240,235,225,0.5)">View invoice: automated-pro.onrender.com/invoice/{inv["id"]}</p>'
+
+    sub_html = ""
     if inv.get("has_subscription") and sub_stripe_url:
         sub_amt = inv.get("sub_amount", 0)
         sub_int = inv.get("sub_interval", "month")
         sub_desc = inv.get("sub_description", "") or "Monthly retainer"
-        sub_section = f"\nSubscription: {sub_desc} — ${sub_amt:.2f}/{sub_int}\nSubscribe: {sub_stripe_url}\n"
-    return (
-        f"Hi {inv['client_name']},\n\n"
-        f"Your invoice #{inv['invoice_number']} is ready.\n"
-        f"Setup fee: ${inv['amount']:.2f}\n"
-        f"Description: {inv.get('description') or 'Automation Services'}\n".rstrip() + "\n"
-        f"Due: {inv.get('due_date') or 'Upon receipt'}\n"
-        f"{payment_section}"
-        f"{sub_section}"
-        "\n"
-        "Thanks,\n"
-        "Emilio Pegolo\n"
-        "Automate Pro"
-    )
+        sub_html = f"""
+<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(212,165,100,0.2),transparent);margin:28px 0"></div>
+<h2 style="font-size:13px;color:#D4A564;margin:0 0 16px;font-weight:400;font-family:monospace;letter-spacing:0.06em">MONTHLY SUBSCRIPTION</h2>
+<p style="font-size:15px;line-height:1.6;color:rgba(240,235,225,0.7);margin:0 0 8px"><b>{sub_desc}</b> &mdash; ${sub_amt:,.2f}/{sub_int}</p>
+<a href="{sub_stripe_url}" style="display:inline-block;padding:14px 32px;background:#D4A564;color:#080807;font-weight:600;font-size:15px;border-radius:10px;text-decoration:none;margin:8px 0">Subscribe</a>
+"""
+
+    content = f"""
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#191816;border:1px solid rgba(212,165,100,0.12);border-radius:14px">
+<tr><td style="padding:36px 28px">
+<h1 style="font-size:22px;color:#F0EBE1;margin:0 0 6px;font-weight:600">Invoice Ready</h1>
+<h2 style="font-size:13px;color:#D4A564;margin:0 0 28px;font-weight:400;font-family:monospace;letter-spacing:0.06em">#{inv["invoice_number"]}</h2>
+
+<p style="font-size:15px;line-height:1.6;color:rgba(240,235,225,0.7);margin:0 0 16px">Hi <b>{inv["client_name"]}</b>,</p>
+<p style="font-size:15px;line-height:1.6;color:rgba(240,235,225,0.7);margin:0 0 24px">Your invoice is ready. Here's the summary:</p>
+
+<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px">
+<tr><td style="padding:10px 0;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:11px;color:rgba(240,235,225,0.3);text-transform:uppercase;letter-spacing:0.1em;font-family:monospace">Setup Fee</span></td><td style="padding:10px 0;text-align:right;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:18px;color:#F0EBE1;font-weight:600;font-family:monospace">${inv["amount"]:,.2f}</span></td></tr>
+<tr><td style="padding:10px 0;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:11px;color:rgba(240,235,225,0.3);text-transform:uppercase;letter-spacing:0.1em;font-family:monospace">Description</span></td><td style="padding:10px 0;text-align:right;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:14px;color:#F0EBE1">{inv.get("description") or "Automation Services"}</span></td></tr>
+<tr><td style="padding:10px 0"><span style="font-size:11px;color:rgba(240,235,225,0.3);text-transform:uppercase;letter-spacing:0.1em;font-family:monospace">Due</span></td><td style="padding:10px 0;text-align:right"><span style="font-size:14px;color:#F0EBE1">{inv.get("due_date") or "Upon receipt"}</span></td></tr>
+</table>
+
+{setup_html}
+{sub_html}
+
+<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(212,165,100,0.2),transparent);margin:28px 0"></div>
+<p style="font-size:14px;color:rgba(240,235,225,0.45);margin:0">Thanks,<br><b style="color:rgba(240,235,225,0.8)">Emilio Pegolo</b><br>Automate Pro</p>
+</td></tr>
+</table>
+</td></tr>
+</table>"""
+    return _html_email(f"Invoice #{inv['invoice_number']} from Automate Pro", content)
 
 
 # ── Auth decorator ───────────────────────────────────────────────────────────
@@ -546,18 +635,28 @@ def api_lead():
     # Notify the client if this is a client lead
     if matched_client_id and notify_email:
         client_creds = CLIENT_CREDENTIALS[matched_client_id]
-        client_notify_subject = f"\U0001f4ac New Lead: {name} - {business_type or 'Inquiry'}"
-        client_notify_body = (
-            f"Hi {client_creds['name']},\n\n"
-            f"You have a new lead from your website:\n\n"
-            f"Name: {name}\n"
-            f"Email: {email}\n"
-            f"Phone: {phone or '(not provided)'}\n"
-            f"Service: {business_type or 'N/A'}\n"
-            f"Message: {message or '(none)'}\n"
-            f"Time: {timestamp}\n\n"
-            f"View all leads: https://{DOMAIN}/portal/{matched_client_id}\n"
-        )
+        client_notify_subject = f"New Lead: {name} — {business_type or 'Inquiry'}"
+        client_notify_body = _html_email(client_notify_subject, f"""
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#191816;border:1px solid rgba(212,165,100,0.12);border-radius:14px">
+<tr><td style="padding:36px 28px">
+<h1 style="font-size:22px;color:#F0EBE1;margin:0 0 6px;font-weight:600">New Lead Received</h1>
+<h2 style="font-size:13px;color:#D4A564;margin:0 0 28px;font-weight:400;font-family:monospace;letter-spacing:0.06em">VIA {DOMAIN}</h2>
+<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px">
+<tr><td style="padding:10px 0;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:11px;color:rgba(240,235,225,0.3);text-transform:uppercase;letter-spacing:0.1em;font-family:monospace">Name</span></td><td style="padding:10px 0;text-align:right;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:15px;color:#F0EBE1;font-weight:500">{name}</span></td></tr>
+<tr><td style="padding:10px 0;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:11px;color:rgba(240,235,225,0.3);text-transform:uppercase;letter-spacing:0.1em;font-family:monospace">Email</span></td><td style="padding:10px 0;text-align:right;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:15px;color:#F0EBE1;font-weight:500">{email}</span></td></tr>
+<tr><td style="padding:10px 0;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:11px;color:rgba(240,235,225,0.3);text-transform:uppercase;letter-spacing:0.1em;font-family:monospace">Phone</span></td><td style="padding:10px 0;text-align:right;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:15px;color:#F0EBE1;font-weight:500">{phone or '(not provided)'}</span></td></tr>
+<tr><td style="padding:10px 0;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:11px;color:rgba(240,235,225,0.3);text-transform:uppercase;letter-spacing:0.1em;font-family:monospace">Service</span></td><td style="padding:10px 0;text-align:right;border-bottom:1px solid rgba(212,165,100,0.06)"><span style="font-size:15px;color:#F0EBE1;font-weight:500">{business_type or 'N/A'}</span></td></tr>
+</table>
+<div style="background:rgba(212,165,100,0.06);border-radius:10px;padding:20px;margin-bottom:20px">
+<p style="font-size:14px;line-height:1.5;color:rgba(240,235,225,0.65);margin:0">{message or '(no message)'}</p>
+</div>
+<a href="https://{DOMAIN}/portal/{matched_client_id}" style="display:inline-block;padding:14px 32px;background:#D4A564;color:#080807;font-weight:600;font-size:15px;border-radius:10px;text-decoration:none">View All Leads</a>
+</td></tr>
+</table>
+</td></tr>
+</table>""")
         result = send_email(notify_email, client_notify_subject, client_notify_body)
         if not result.get("success"):
             gmail_errors.append(f"Client notify failed: {result.get('error')}")
