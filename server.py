@@ -1073,7 +1073,10 @@ def api_get_lead(lead_id):
 def login_page():
     if session.get("logged_in"):
         return redirect(url_for("dashboard_page"))
-    return render_template_string(LOGIN_HTML)
+    resp = app.make_response(render_template_string(LOGIN_HTML))
+    resp.headers["Cache-Control"] = "no-store, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @app.route("/login", methods=["POST"])
@@ -1654,7 +1657,10 @@ def client_portal_logout(client_id):
 @app.route("/dashboard")
 @login_required
 def dashboard_page():
-    return render_template_string(DASHBOARD_HTML)
+    resp = app.make_response(render_template_string(DASHBOARD_HTML))
+    resp.headers["Cache-Control"] = "no-store, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 # ── Invoice Endpoints ───────────────────────────────────────────────────────
