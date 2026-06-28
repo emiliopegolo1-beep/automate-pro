@@ -697,6 +697,9 @@ def build_follow_up_email(client_name, lead_name, delay_hours):
 </td></tr>
 </table>"""
     return subject, _html_email(subject, body)
+
+
+def build_notify_body(name, email, business_type, message, timestamp):
     content = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
 <tr><td>
